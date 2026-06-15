@@ -18,7 +18,10 @@ RUN chmod +x /torrent-indexer
 #####################################################
 ### Build Final Image
 FROM alpine AS release
-LABEL maintainer="felipevm97@gmail.com"
+LABEL maintainer="Erickfb"
+LABEL org.opencontainers.image.source="https://github.com/Erickfb/torrent-indexer"
+LABEL org.opencontainers.image.description="Torrent indexer"
+LABEL org.opencontainers.image.licenses="GPL-3.0"
 
 COPY --from=copy-binary /torrent-indexer /app/
 
