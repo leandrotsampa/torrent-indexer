@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -34,6 +35,7 @@ func NewFlareSolverr(url string, timeoutMilli int, poolSize int) *FlareSolverr {
 	if poolSize <= 0 {
 		poolSize = 5
 	}
+	url = normalizeFlareSolverrURL(url)
 	httpClient := &http.Client{
 		Timeout: time.Duration(timeoutMilli) * time.Millisecond,
 	}
@@ -52,6 +54,25 @@ func NewFlareSolverr(url string, timeoutMilli int, poolSize int) *FlareSolverr {
 	}
 
 	return f
+}
+
+func normalizeFlareSolverrURL(address string) string {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return ""
+	}
+	if !strings.HasPrefix(address, "http://") && !strings.HasPrefix(address, "https://") {
+		address = "http://" + address
+	}
+
+	parsedURL, err := url.Parse(address)
+	if err != nil || parsedURL.Host == "" {
+		return strings.TrimRight(address, "/")
+	}
+	if parsedURL.Port() == "" {
+		parsedURL.Host = net.JoinHostPort(parsedURL.Hostname(), "8191")
+	}
+	return strings.TrimRight(parsedURL.String(), "/")
 }
 
 func (f *FlareSolverr) FillSessionPool() error {

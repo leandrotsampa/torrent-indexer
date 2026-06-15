@@ -41,7 +41,7 @@ You can configure the server using the following environment variables:
 - `LOG_LEVEL`: (optional) The log level. Default: `1` (info). 
   - Possible values: `0` (debug), `1` (info), `2` (warn), `3` (error)
 - `LOG_FORMAT`: (optional) The log format. Can be "json" or default to console logger.
-- `FLARESOLVERR_ADDRESS`: (optional) The address of the FlareSolverr instance. Default: `N/A`
+- `FLARESOLVERR_ADDRESS`: (optional) The address of the FlareSolverr instance, including scheme and port, e.g. `http://192.168.6.10:8191`. If only a host/IP is provided, port `8191` and `http://` are assumed. Default: `N/A`
 - `FLARESOLVERR_TIMEOUT_SECONDS`: (optional) Timeout for flaresolverr requests. Default: `30`
 - `FLARESOLVERR_POOL_SIZE`: (optional) Number of FlareSolverr sessions in the pool. Default: `5`
 - `REQUEST_TIMEOUT_MILLISECONDS`: (optional) Timeout for external scraping requests. Default: `5000`
