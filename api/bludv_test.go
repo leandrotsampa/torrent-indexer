@@ -151,3 +151,21 @@ func TestMatchesBluDVRequestedTitleRejectsExtraSubtitle(t *testing.T) {
 		t.Fatal("expected spin-off title not to match")
 	}
 }
+
+func TestNormalizeBluDVReleaseTitleForSonarrAddsSeasonTag(t *testing.T) {
+	got := normalizeBluDVReleaseTitleForSonarr("Rick and Morty 1a Temporada Torrent - BluRay 720p/1080p Dual Audio (eng)")
+	want := "Rick and Morty S01 1a Temporada Torrent - BluRay 720p/1080p Dual Audio (eng)"
+
+	if got != want {
+		t.Fatalf("normalizeBluDVReleaseTitleForSonarr() = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeBluDVReleaseTitleForSonarrDoesNotDuplicateSeasonTag(t *testing.T) {
+	got := normalizeBluDVReleaseTitleForSonarr("Rick and Morty S01 1a Temporada Torrent")
+	want := "Rick and Morty S01 1a Temporada Torrent"
+
+	if got != want {
+		t.Fatalf("normalizeBluDVReleaseTitleForSonarr() = %q, want %q", got, want)
+	}
+}

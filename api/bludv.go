@@ -35,6 +35,7 @@ var (
 	bludvSeasonOnlyQueryRE     = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}\b|\be0*[0-9]{1,3}\b|\btemporada\s+0*[0-9]{1,3}\b|\bepis.?dio\s+0*[0-9]{1,3}\b`)
 	bludvSeasonInReleaseNameRE = regexp.MustCompile(`(?i)\b0*([0-9]{1,3})\D{0,6}temporada\b|\btemporada\D{0,6}0*([0-9]{1,3})\b|\bs0*([0-9]{1,3})(?:[\s._-]*e0*[0-9]{1,3})?\b`)
 	bludvConjunctionQueryRE    = regexp.MustCompile(`(?i)\b(and|es|y|et)\b`)
+	bludvSonarrSeasonRE        = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}\b`)
 	bludvNonWordRE             = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
@@ -384,6 +385,39 @@ func normalizeBluDVSeasonNumber(season string) string {
 	return season
 }
 
+func normalizeBluDVReleaseTitleForSonarr(title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" || bludvSonarrSeasonRE.MatchString(title) {
+		return title
+	}
+
+	season := extractBluDVSeason(title)
+	if season == "" {
+		return title
+	}
+
+	matches := bludvSeasonInReleaseNameRE.FindStringIndex(title)
+	if len(matches) == 0 {
+		return fmt.Sprintf("%s %s", title, formatBluDVSeasonTag(season))
+	}
+
+	prefix := strings.TrimSpace(title[:matches[0]])
+	suffix := strings.TrimSpace(title[matches[0]:])
+	if prefix == "" {
+		return fmt.Sprintf("%s %s", formatBluDVSeasonTag(season), suffix)
+	}
+
+	return fmt.Sprintf("%s %s %s", prefix, formatBluDVSeasonTag(season), suffix)
+}
+
+func formatBluDVSeasonTag(season string) string {
+	if len(season) == 1 {
+		season = "0" + season
+	}
+
+	return "S" + season
+}
+
 func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]schema.IndexedTorrent, error) {
 	var indexedTorrents []schema.IndexedTorrent
 	doc, err := getDocument(ctx, i, link, referer)
@@ -511,6 +545,7 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 			}
 
 			title := processTitle(title, magnetAudio)
+			title = normalizeBluDVReleaseTitleForSonarr(title)
 
 			// if the number of sizes is equal to the number of magnets, then assign the size to each indexed torrent in order
 			var mySize string
