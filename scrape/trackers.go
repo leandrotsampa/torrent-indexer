@@ -102,7 +102,12 @@ func fetchDynamicTrackers(ctx context.Context, r *cache.Redis) ([]string, error)
 	return nil, lastErr
 }
 
-// getAdditionalTrackers returns dynamic trackers with fallback to static ones
+// AdditionalTrackers returns dynamic trackers with fallback to static ones.
+func AdditionalTrackers(ctx context.Context, r *cache.Redis) []string {
+	return getAdditionalTrackers(ctx, r)
+}
+
+// getAdditionalTrackers returns dynamic trackers with fallback to static ones.
 func getAdditionalTrackers(ctx context.Context, r *cache.Redis) []string {
 	// Try to get dynamic trackers first
 	dynamicTrackers, err := fetchDynamicTrackers(ctx, r)

@@ -28,7 +28,10 @@ var bludv = IndexerMeta{
 	PagePattern: "page/%s",
 }
 
-const bludvMaxSeasonSearchPages = 3
+const (
+	bludvMaxSeasonSearchPages = 3
+	bludvMaxMagnetTrackers    = 25
+)
 
 var (
 	bludvSeasonEpisodeQueryRE  = regexp.MustCompile(`(?i)\bs0*([0-9]{1,3})[\s._-]*e0*([0-9]{1,3})\b`)
@@ -701,6 +704,10 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 	})
 
 	size = utils.StableUniq(size)
+	additionalTrackers := goscrape.AdditionalTrackers(ctx, i.redis)
+	if len(additionalTrackers) > bludvMaxMagnetTrackers {
+		additionalTrackers = additionalTrackers[:bludvMaxMagnetTrackers]
+	}
 
 	var chanIndexedTorrent = make(chan schema.IndexedTorrent)
 
@@ -715,6 +722,7 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 			releaseTitle := magnet.DisplayName
 			infoHash := magnet.InfoHash.String()
 			trackers := magnet.Trackers
+			magnetLink = appendTrackersToMagnetLink(magnetLink, additionalTrackers)
 			magnetAudio := getAudioFromTitle(releaseTitle, audio)
 
 			peer, seed, err := goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, trackers)
