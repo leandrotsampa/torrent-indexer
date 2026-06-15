@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,6 +39,8 @@ var (
 	bludvConjunctionQueryRE    = regexp.MustCompile(`(?i)\b(and|es|y|et)\b`)
 	bludvSonarrSeasonEpisodeRE = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}[\s._-]*e0*[0-9]{1,3}\b`)
 	bludvSonarrSeasonRE        = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}\b`)
+	bludvMultiResolutionRE     = regexp.MustCompile(`(?i)\b(?:480p|720p|1080p|2160p|4k)\b(?:\s*(?:[/|,]|\bor\b|\band\b|\be\b|\bou\b)\s*\b(?:480p|720p|1080p|2160p|4k)\b)+`)
+	bludvResolutionRE          = regexp.MustCompile(`(?i)\b(?:480p|720p|1080p|2160p|4k)\b`)
 	bludvNonWordRE             = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
@@ -480,6 +483,119 @@ func formatBluDVEpisodeTag(episode string) string {
 	return "E" + episode
 }
 
+func normalizeBluDVReleaseQualityForSonarr(title, releaseTitle string, torrentIndex, torrentCount int, sizes []string) string {
+	matches := bludvMultiResolutionRE.FindStringIndex(title)
+	if len(matches) == 0 {
+		return title
+	}
+
+	resolutionBlock := title[matches[0]:matches[1]]
+	resolutions := extractBluDVResolutions(resolutionBlock)
+	if len(resolutions) < 2 {
+		return title
+	}
+
+	selectedResolution := selectBluDVResolution(releaseTitle, torrentIndex, torrentCount, sizes, resolutions)
+	if selectedResolution == "" {
+		return title
+	}
+
+	return fmt.Sprintf("%s%s%s", title[:matches[0]], selectedResolution, title[matches[1]:])
+}
+
+func selectBluDVResolution(releaseTitle string, torrentIndex, torrentCount int, sizes, resolutions []string) string {
+	releaseResolutions := extractBluDVResolutions(releaseTitle)
+	if len(releaseResolutions) == 1 {
+		return releaseResolutions[0]
+	}
+
+	if torrentCount == len(sizes) {
+		return selectBluDVResolutionBySize(torrentIndex, sizes, resolutions)
+	}
+
+	return ""
+}
+
+func selectBluDVResolutionBySize(torrentIndex int, sizes, resolutions []string) string {
+	if torrentIndex < 0 || torrentIndex >= len(sizes) || len(sizes) != len(resolutions) {
+		return ""
+	}
+
+	type indexedSize struct {
+		index int
+		bytes int64
+	}
+
+	indexedSizes := make([]indexedSize, 0, len(sizes))
+	for idx, size := range sizes {
+		bytes := utils.ParseSize(size)
+		if bytes == 0 {
+			return ""
+		}
+
+		indexedSizes = append(indexedSizes, indexedSize{index: idx, bytes: bytes})
+	}
+
+	sort.SliceStable(indexedSizes, func(i, j int) bool {
+		return indexedSizes[i].bytes < indexedSizes[j].bytes
+	})
+
+	sortedResolutions := append([]string(nil), resolutions...)
+	sort.SliceStable(sortedResolutions, func(i, j int) bool {
+		return bludvResolutionRank(sortedResolutions[i]) < bludvResolutionRank(sortedResolutions[j])
+	})
+
+	for rank, indexedSize := range indexedSizes {
+		if indexedSize.index == torrentIndex {
+			return sortedResolutions[rank]
+		}
+	}
+
+	return ""
+}
+
+func extractBluDVResolutions(text string) []string {
+	matches := bludvResolutionRE.FindAllString(text, -1)
+	resolutions := make([]string, 0, len(matches))
+	seen := map[string]bool{}
+
+	for _, match := range matches {
+		resolution := normalizeBluDVResolution(match)
+		if seen[resolution] {
+			continue
+		}
+
+		seen[resolution] = true
+		resolutions = append(resolutions, resolution)
+	}
+
+	return resolutions
+}
+
+func normalizeBluDVResolution(resolution string) string {
+	resolution = strings.ToLower(strings.TrimSpace(resolution))
+	if resolution == "4k" {
+		return "2160p"
+	}
+
+	return resolution
+}
+
+func bludvResolutionRank(resolution string) int {
+	switch normalizeBluDVResolution(resolution) {
+	case "480p":
+		return 480
+	case "720p":
+		return 720
+	case "1080p":
+		return 1080
+	case "2160p":
+		return 2160
+	default:
+		return 0
+	}
+}
+
 func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]schema.IndexedTorrent, error) {
 	var indexedTorrents []schema.IndexedTorrent
 	doc, err := getDocument(ctx, i, link, referer)
@@ -606,9 +722,6 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 				logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
 			}
 
-			title := processTitle(title, magnetAudio)
-			title = normalizeBluDVReleaseTitleForSonarr(title)
-
 			// if the number of sizes is equal to the number of magnets, then assign the size to each indexed torrent in order
 			var mySize string
 			if len(size) == len(magnetLinks) {
@@ -619,6 +732,10 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 					_, _ = i.magnetMetadataAPI.FetchMetadata(ctx, magnetLink)
 				}()
 			}
+
+			title := processTitle(title, magnetAudio)
+			title = normalizeBluDVReleaseTitleForSonarr(title)
+			title = normalizeBluDVReleaseQualityForSonarr(title, releaseTitle, it, len(magnetLinks), size)
 
 			ixt := schema.IndexedTorrent{
 				Title:         releaseTitle,

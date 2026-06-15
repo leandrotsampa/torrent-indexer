@@ -196,3 +196,31 @@ func TestNormalizeBluDVReleaseTitleForSonarrDoesNotDuplicateSeasonTag(t *testing
 		t.Fatalf("normalizeBluDVReleaseTitleForSonarr() = %q, want %q", got, want)
 	}
 }
+
+func TestNormalizeBluDVReleaseQualityForSonarrSelectsQualityBySize(t *testing.T) {
+	title := "Rick and Morty S01 1a Temporada Torrent - BluRay 720p/1080p Dual Audio (eng)"
+	sizes := []string{"5.4 GB", "8.8 GB"}
+
+	got720p := normalizeBluDVReleaseQualityForSonarr(title, "", 0, 2, sizes)
+	want720p := "Rick and Morty S01 1a Temporada Torrent - BluRay 720p Dual Audio (eng)"
+	if got720p != want720p {
+		t.Fatalf("normalizeBluDVReleaseQualityForSonarr() = %q, want %q", got720p, want720p)
+	}
+
+	got1080p := normalizeBluDVReleaseQualityForSonarr(title, "", 1, 2, sizes)
+	want1080p := "Rick and Morty S01 1a Temporada Torrent - BluRay 1080p Dual Audio (eng)"
+	if got1080p != want1080p {
+		t.Fatalf("normalizeBluDVReleaseQualityForSonarr() = %q, want %q", got1080p, want1080p)
+	}
+}
+
+func TestNormalizeBluDVReleaseQualityForSonarrUsesMagnetDisplayNameQuality(t *testing.T) {
+	title := "Rick and Morty S01 1a Temporada Torrent - BluRay 720p/1080p Dual Audio (eng)"
+
+	got := normalizeBluDVReleaseQualityForSonarr(title, "Rick and Morty S01 1080p BluRay", 0, 1, nil)
+	want := "Rick and Morty S01 1a Temporada Torrent - BluRay 1080p Dual Audio (eng)"
+
+	if got != want {
+		t.Fatalf("normalizeBluDVReleaseQualityForSonarr() = %q, want %q", got, want)
+	}
+}
