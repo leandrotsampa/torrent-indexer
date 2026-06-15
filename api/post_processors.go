@@ -101,11 +101,17 @@ func FallbackPostTitle(i *Indexer, r *http.Request, torrents []schema.IndexedTor
 	emptyTitles := 0
 
 	for idx := range torrents {
-		if torrents[idx].Title == "" {
-			if i.config.FallbackTitleEnabled {
-				torrents[idx].Title = fmt.Sprintf("[UNSAFE] %s", torrents[idx].OriginalTitle)
-			} else {
+		if strings.TrimSpace(torrents[idx].Title) == "" {
+			fallbackTitle := strings.TrimSpace(torrents[idx].OriginalTitle)
+			if fallbackTitle == "" {
 				emptyTitles++
+				continue
+			}
+
+			if i.config.FallbackTitleEnabled {
+				torrents[idx].Title = fmt.Sprintf("[UNSAFE] %s", fallbackTitle)
+			} else {
+				torrents[idx].Title = fallbackTitle
 			}
 		}
 	}

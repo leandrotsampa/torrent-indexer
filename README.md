@@ -56,8 +56,8 @@ You can configure the server using the following environment variables:
     - This cache is used to store the torrent webpages (posts). You can set it to a higher value because the torrent pages are not updated frequently.
 
 ### Extra Configuration
-- `FALLBACK_TITLE_ENABLED`: (optional) Enable the fallback title post-processor that sets the title to "[UNSAFE] {original_title}" (Page title) if the title is empty. Default: `false`
-    - This is useful for sites that do not have a title for some torrents, but can lead to misleading titles.
+- `FALLBACK_TITLE_ENABLED`: (optional) Mark title fallbacks as unsafe by prefixing `"[UNSAFE] "` when the magnet does not provide a display name and the page title is used instead. Default: `false`
+    - The API always returns a non-empty `title` when `original_title` is available because Prowlarr/Sonarr require release titles.
 - `MAGNET_METADATA_API_ENABLED`: (optional) Enable the magnet metadata API. (deploy instrucitons [here](https://github.com/felipemarinho97/magnet-metadata-api)) Default: `false`
 - `MAGNET_METADATA_API_ADDRESS`: (optional) The address of your magnet metadata API. Default: `N/A`
 - `MAGNET_METADATA_API_TIMEOUT_SECONDS`: (optional) The timeout for the magnet metadata API requests in seconds. Default: `10`
