@@ -17,6 +17,7 @@ Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org
 - [starck-filmes](https://www.starckfilmes-v20.com/)
 - [rede-torrent](https://redetorrent.com/)
 - [vaca-torrent](https://vaqueirofilmes.com/)
+- [erai-raws](https://www.erai-raws.info/)
 
 ## Deploy
 
@@ -62,6 +63,14 @@ You can configure the server using the following environment variables:
 - `MAGNET_METADATA_API_TIMEOUT_SECONDS`: (optional) The timeout for the magnet metadata API requests in seconds. Default: `10`
 - `INDEXER_<NAME>_URL`: (optional) Set a custom URL for the indexer. Where the "NAME" will be always uppercase indexer key with underscores. ex: `INDEXER_DODO_FILMES_URL=https://my-proxied-dodo-url.org`
     - `comando_torrents` supports both `INDEXER_COMANDO_TORRENTS_URL` and the legacy `INDEXER_COMANDO_URL`.
+    - `erai_raws` defaults to `https://www.erai-raws.info/` and supports `INDEXER_ERAI_RAWS_URL`.
+- `INDEXER_ERAI_RAWS_RSS_URL`: (optional, recommended) Full authenticated Erai-raws RSS URL. Use this if your Erai-raws account provides a personal RSS/token URL.
+- `ERAI_RAWS_AUTH_TOKEN`: (optional) Authentication token for Erai-raws feeds.
+- `ERAI_RAWS_AUTH_QUERY_PARAM`: (optional) Query parameter name for `ERAI_RAWS_AUTH_TOKEN`. Default: `token`.
+- `ERAI_RAWS_AUTH_HEADER`: (optional) Header name for `ERAI_RAWS_AUTH_TOKEN` if your feed expects token authentication via header.
+- `ERAI_RAWS_USERNAME`: (optional) Username for Erai-raws authenticated requests.
+- `ERAI_RAWS_PASSWORD`: (optional) Password for Erai-raws authenticated requests.
+- `ERAI_RAWS_COOKIE`: (optional) Raw Cookie header for Erai-raws, useful when the site requires a browser-authenticated session.
 ## Integrating with Jackett
 
 You can integrate this indexer with Jackett by adding a new Torznab custom indexer. Here is an example of how to do it for the `bludv` indexer:
