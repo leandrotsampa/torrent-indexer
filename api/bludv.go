@@ -34,6 +34,7 @@ var (
 	bludvTemporadaEpisodeRE    = regexp.MustCompile(`(?i)\btemporada\s+0*([0-9]{1,3})\s+epis.?dio\s+0*([0-9]{1,3})\b`)
 	bludvSeasonOnlyQueryRE     = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}\b|\be0*[0-9]{1,3}\b|\btemporada\s+0*[0-9]{1,3}\b|\bepis.?dio\s+0*[0-9]{1,3}\b`)
 	bludvSeasonInReleaseNameRE = regexp.MustCompile(`(?i)\b0*([0-9]{1,3})\D{0,6}temporada\b|\btemporada\D{0,6}0*([0-9]{1,3})\b|\bs0*([0-9]{1,3})(?:[\s._-]*e0*[0-9]{1,3})?\b`)
+	bludvConjunctionQueryRE    = regexp.MustCompile(`(?i)\b(and|es|y|et)\b`)
 	bludvNonWordRE             = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
@@ -252,8 +253,13 @@ func normalizeBluDVSearchQuery(q string) string {
 
 	q = replaceBluDVSeasonEpisodeWithSeason(q, bludvSeasonEpisodeQueryRE)
 	q = replaceBluDVSeasonEpisodeWithSeason(q, bludvTemporadaEpisodeRE)
+	q = normalizeBluDVSearchConjunctions(q)
 
 	return strings.Join(strings.Fields(q), " ")
+}
+
+func normalizeBluDVSearchConjunctions(q string) string {
+	return bludvConjunctionQueryRE.ReplaceAllString(q, "e")
 }
 
 func replaceBluDVSeasonEpisodeWithSeason(q string, re *regexp.Regexp) string {
@@ -343,7 +349,7 @@ func bludvComparableTokens(text string) []string {
 
 	var tokens []string
 	for _, token := range strings.Fields(normalized) {
-		if token == "e" {
+		if isBluDVConjunctionToken(token) {
 			token = "and"
 		}
 		if bludvIgnoredTitleTokens[token] {
@@ -353,6 +359,15 @@ func bludvComparableTokens(text string) []string {
 	}
 
 	return tokens
+}
+
+func isBluDVConjunctionToken(token string) bool {
+	switch token {
+	case "e", "and", "es", "y", "et":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeBluDVComparableText(text string) string {

@@ -8,7 +8,7 @@ import (
 
 func TestNormalizeBluDVSearchQueryConvertsSeasonEpisode(t *testing.T) {
 	got := normalizeBluDVSearchQuery("rick and morty s01e02")
-	want := "rick and morty temporada 1"
+	want := "rick e morty temporada 1"
 
 	if got != want {
 		t.Fatalf("normalizeBluDVSearchQuery() = %q, want %q", got, want)
@@ -17,7 +17,7 @@ func TestNormalizeBluDVSearchQueryConvertsSeasonEpisode(t *testing.T) {
 
 func TestNormalizeBluDVSearchQueryDropsEpisodeFromTemporadaQuery(t *testing.T) {
 	got := normalizeBluDVSearchQuery("rick and morty temporada 1 episodio 2")
-	want := "rick and morty temporada 1"
+	want := "rick e morty temporada 1"
 
 	if got != want {
 		t.Fatalf("normalizeBluDVSearchQuery() = %q, want %q", got, want)
@@ -26,10 +26,25 @@ func TestNormalizeBluDVSearchQueryDropsEpisodeFromTemporadaQuery(t *testing.T) {
 
 func TestNormalizeBluDVSearchQueryConvertsSeasonEpisodeWithSeparators(t *testing.T) {
 	got := normalizeBluDVSearchQuery("Rick.And.Morty.S01.E02.1080p")
-	want := "Rick.And.Morty.temporada 1.1080p"
+	want := "Rick.e.Morty.temporada 1.1080p"
 
 	if got != want {
 		t.Fatalf("normalizeBluDVSearchQuery() = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeBluDVSearchQueryConvertsSonarrConjunctionsToPortuguese(t *testing.T) {
+	cases := map[string]string{
+		"rick and morty s01e01": "rick e morty temporada 1",
+		"rick y morty s01e01":   "rick e morty temporada 1",
+		"rick et morty s01e01":  "rick e morty temporada 1",
+		"rick es morty s01e01":  "rick e morty temporada 1",
+	}
+
+	for input, want := range cases {
+		if got := normalizeBluDVSearchQuery(input); got != want {
+			t.Fatalf("normalizeBluDVSearchQuery(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 
@@ -118,8 +133,16 @@ func TestFilterBluDVSearchLinksKeepsRequestedTitleAndSeason(t *testing.T) {
 }
 
 func TestMatchesBluDVRequestedTitleTreatsEAndAndAsEquivalent(t *testing.T) {
-	if !matchesBluDVRequestedTitle("rick e morty s01e01", "Rick and Morty 1a Temporada Torrent") {
-		t.Fatal("expected title to match")
+	for _, query := range []string{
+		"rick e morty s01e01",
+		"rick and morty s01e01",
+		"rick y morty s01e01",
+		"rick et morty s01e01",
+		"rick es morty s01e01",
+	} {
+		if !matchesBluDVRequestedTitle(query, "Rick and Morty 1a Temporada Torrent") {
+			t.Fatalf("expected title to match query %q", query)
+		}
 	}
 }
 

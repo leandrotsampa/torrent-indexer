@@ -108,6 +108,8 @@ search:
   keywordsfilters:
     - name: tolower
     - name: re_replace
+      args: ["(?i)\\b(and|es|y|et)\\b", "e"]
+    - name: re_replace
       args: ["(?i)\\bs0*(\\d{1,3})[\\s._-]*e0*(\\d{1,3})\\b", "temporada $1"]
 
   rows:
@@ -199,6 +201,8 @@ search:
     q: "{{ .Keywords }}"
   keywordsfilters:
     - name: tolower
+    - name: re_replace
+      args: ["(?i)\\b(and|es|y|et)\\b", "e"]
     - name: re_replace
       args: ["(?i)\\bs0*(\\d{1,3})[\\s._-]*e0*(\\d{1,3})\\b", "temporada $1"]
     - name: re_replace
