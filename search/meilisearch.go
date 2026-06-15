@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/felipemarinho97/torrent-indexer/schema"
+	"github.com/Erickfb/torrent-indexer/schema"
 )
 
 // SearchIndexer integrates with Meilisearch to index and search torrent items.

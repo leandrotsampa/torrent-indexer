@@ -3,7 +3,7 @@ package requester
 import (
 	"net/http"
 
-	"github.com/felipemarinho97/torrent-indexer/utils"
+	"github.com/Erickfb/torrent-indexer/utils"
 	"github.com/fereidani/httpdecompressor"
 )
 

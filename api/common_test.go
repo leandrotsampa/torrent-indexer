@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/felipemarinho97/torrent-indexer/schema"
+	"github.com/Erickfb/torrent-indexer/schema"
 )
 
 func Test_getPublishedDateFromRawString(t *testing.T) {

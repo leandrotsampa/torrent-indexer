@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/felipemarinho97/torrent-indexer/logging"
-	"github.com/felipemarinho97/torrent-indexer/magnet"
-	"github.com/felipemarinho97/torrent-indexer/schema"
-	goscrape "github.com/felipemarinho97/torrent-indexer/scrape"
-	"github.com/felipemarinho97/torrent-indexer/utils"
+	"github.com/Erickfb/torrent-indexer/logging"
+	"github.com/Erickfb/torrent-indexer/magnet"
+	"github.com/Erickfb/torrent-indexer/schema"
+	goscrape "github.com/Erickfb/torrent-indexer/scrape"
+	"github.com/Erickfb/torrent-indexer/utils"
 )
 
 var comando = IndexerMeta{

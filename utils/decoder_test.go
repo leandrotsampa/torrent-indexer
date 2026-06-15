@@ -3,7 +3,7 @@ package utils_test
 import (
 	"testing"
 
-	"github.com/felipemarinho97/torrent-indexer/utils"
+	"github.com/Erickfb/torrent-indexer/utils"
 )
 
 func TestDecodeAdLink(t *testing.T) {

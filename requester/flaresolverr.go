@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/felipemarinho97/torrent-indexer/logging"
-	"github.com/felipemarinho97/torrent-indexer/utils"
+	"github.com/Erickfb/torrent-indexer/logging"
+	"github.com/Erickfb/torrent-indexer/utils"
 )
 
 type FlareSolverr struct {
