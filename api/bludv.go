@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -25,6 +26,8 @@ var bludv = IndexerMeta{
 	PagePattern: "page/%s",
 }
 
+var bludvSeasonEpisodeQueryRE = regexp.MustCompile(`(?i)\bs0*(\d{1,3})[\s._-]*e0*(\d{1,3})\b`)
+
 func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	metadata := bludv
@@ -36,7 +39,7 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	// supported query params: q, season, episode, page, filter_results
-	q := r.URL.Query().Get("q")
+	q := normalizeBluDVSearchQuery(r.URL.Query().Get("q"))
 	page := r.URL.Query().Get("page")
 
 	// URL encode query param
@@ -105,6 +108,15 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		logging.Error().Err(err).Msg("Failed to encode response")
 	}
+}
+
+func normalizeBluDVSearchQuery(q string) string {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return q
+	}
+
+	return bludvSeasonEpisodeQueryRE.ReplaceAllString(q, "temporada $1 episodio $2")
 }
 
 func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]schema.IndexedTorrent, error) {
