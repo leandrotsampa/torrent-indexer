@@ -162,14 +162,15 @@ links:
   - http://localhost:8080/
 
 caps:
-  categories:
-    Movies: Movies
-    TV: TV
+  categorymappings:
+    - { id: Movies, cat: Movies, desc: "Movies", default: true }
+    - { id: TV, cat: TV, desc: "TV", default: true }
 
   modes:
     search: [q]
-    tv-search: [q, season]
+    tv-search: [q, season, ep]
     movie-search: [q]
+  allowrawsearch: true
 
 settings:
   - name: indexer
@@ -184,10 +185,11 @@ settings:
       starck-filmes: Starck Filmes
       rede_torrent: Rede Torrent
       vaca_torrent: Vaca Torrent
+      erai_raws: Erai-raws
 
 search:
   paths:
-    - path: "{{ if eq .Config.indexer \"search\" }}/search{{ else }}/indexers/{{ .Config.indexer }}{{ end }}"
+    - path: "{{ if eq .Config.indexer \"search\" }}search{{ else }}indexers/{{ .Config.indexer }}{{ end }}"
       response:
         type: json
   inputs:
@@ -234,6 +236,9 @@ search:
     category:
       text: "{{ if .Result.category_is_tv_show }}TV{{ else }}Movies{{ end }}"
 ```
+
+In Prowlarr, set `Base Url` to your running torrent-indexer instance, for example `http://192.168.6.10:7006/`.
+Do not add a `flaresolverr` tag unless you intentionally configured a Prowlarr Indexer Proxy with the same tag; torrent-indexer uses `FLARESOLVERR_ADDRESS` in its own container environment.
 
 
 ## Mirrors
