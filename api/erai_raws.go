@@ -117,13 +117,19 @@ func (i *Indexer) HandlerEraiRawsIndexer(w http.ResponseWriter, r *http.Request)
 }
 
 func buildEraiRawsFeedURL(metadata IndexerMeta, q string) string {
-	if rssURL := os.Getenv("INDEXER_ERAI_RAWS_RSS_URL"); rssURL != "" {
+	rssURL := os.Getenv("INDEXER_ERAI_RAWS_RSS_URL")
+	if rssURL != "" && q == "" {
 		return withEraiRawsToken(rssURL)
 	}
 
-	base, err := url.Parse(metadata.URL)
+	baseURL := metadata.URL
+	if rssURL != "" {
+		baseURL = rssURL
+	}
+
+	base, err := url.Parse(baseURL)
 	if err != nil {
-		return metadata.URL
+		return withEraiRawsToken(baseURL)
 	}
 
 	base.Path = "/feed/"
