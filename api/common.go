@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/felipemarinho97/torrent-indexer/logging"
 	"github.com/felipemarinho97/torrent-indexer/schema"
+	"github.com/felipemarinho97/torrent-indexer/utils"
 )
 
 // getDocument retrieves a document from the cache or makes a request to get it.
@@ -217,6 +220,42 @@ func getIMDBLink(link string) (string, error) {
 		return "", fmt.Errorf("no imdb link found")
 	}
 	return imdbLink, nil
+}
+
+var redirectAdIDRE = regexp.MustCompile(`redirect\s*=\s*"[^"]*[?&]id=([^"&]+)`)
+
+func getMagnetFromSystemAds(ctx context.Context, i *Indexer, link, referer string) (string, error) {
+	resp, err := i.requester.GetDocument(ctx, link, referer)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Close()
+
+	body, err := io.ReadAll(resp)
+	if err != nil {
+		return "", err
+	}
+
+	bodyText := html.UnescapeString(string(body))
+	matches := redirectAdIDRE.FindStringSubmatch(bodyText)
+	if len(matches) < 2 {
+		return "", fmt.Errorf("redirectad id not found")
+	}
+
+	id, err := url.QueryUnescape(matches[1])
+	if err != nil {
+		return "", err
+	}
+
+	magnetLink, err := utils.DecodeAdLink(id)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(magnetLink, "magnet:") {
+		return "", fmt.Errorf("decoded redirectad link is not a magnet")
+	}
+
+	return magnetLink, nil
 }
 
 // appendAudioISO639_2Code appends the audio languages to the title in ISO 639-2 code format.

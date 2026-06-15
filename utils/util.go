@@ -25,31 +25,31 @@ func Filter[A any](arr []A, f func(A) bool) []A {
 // ParallelFlatMap applies a function to each item in the iterable concurrently
 // and returns a slice of results. It can handle errors by passing an error handler function.
 func ParallelFlatMap[T any, R any](iterable []T, mapper func(item T) ([]R, error), errHandler ...func(error)) []R {
-	var itChan = make(chan []R)
-	var errChan = make(chan error)
+	type mapResult struct {
+		items []R
+		err   error
+	}
+
+	var resultChan = make(chan mapResult, len(iterable))
 	mappedItems := []R{}
 	for _, link := range iterable {
 		go func(link T) {
 			items, err := mapper(link)
-			if err != nil {
-				errChan <- err
-			}
-			itChan <- items
+			resultChan <- mapResult{items: items, err: err}
 		}(link)
 	}
 
 	for range iterable {
-		select {
-		case items := <-itChan:
-			mappedItems = append(mappedItems, items...)
-		case err := <-errChan:
+		result := <-resultChan
+		if result.err != nil {
 			for _, handler := range errHandler {
-				handler(err)
+				handler(result.err)
 			}
 			if len(errHandler) == 0 {
-				logging.Error().Err(err).Msg("Error in ParallelFlatMap")
+				logging.Error().Err(result.err).Msg("Error in ParallelFlatMap")
 			}
 		}
+		mappedItems = append(mappedItems, result.items...)
 	}
 	return mappedItems
 }
@@ -182,6 +182,21 @@ func GetEnvOrDefault(key, defaultValue string) string {
 
 func GetIndexerURLFromEnv(key string, defaultValue string) string {
 	value := GetEnvOrDefault(key, defaultValue)
+	return normalizeIndexerURL(value)
+}
+
+func GetIndexerURLFromEnvAny(defaultValue string, keys ...string) string {
+	value := defaultValue
+	for _, key := range keys {
+		if envValue := os.Getenv(key); envValue != "" {
+			value = envValue
+			break
+		}
+	}
+	return normalizeIndexerURL(value)
+}
+
+func normalizeIndexerURL(value string) string {
 	if !strings.HasSuffix(value, "/") {
 		value += "/"
 	}
