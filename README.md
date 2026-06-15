@@ -208,10 +208,12 @@ search:
       selector: $.count
 
   fields:
+    _id:
+      selector: info_hash
     download:
       selector: magnet_link
     title:
-      selector: title
+      selector: original_title
     description:
       selector: original_title
     details:
