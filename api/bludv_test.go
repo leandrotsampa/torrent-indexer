@@ -161,6 +161,33 @@ func TestNormalizeBluDVReleaseTitleForSonarrAddsSeasonTag(t *testing.T) {
 	}
 }
 
+func TestNormalizeBluDVReleaseTitleForSonarrAddsEpisodeTag(t *testing.T) {
+	got := normalizeBluDVReleaseTitleForSonarr("Rick and Morty 1a Temporada Episodio 1 Torrent - WEB-DL 1080p")
+	want := "Rick and Morty S01E01 1a Temporada Episodio 1 Torrent - WEB-DL 1080p"
+
+	if got != want {
+		t.Fatalf("normalizeBluDVReleaseTitleForSonarr() = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeBluDVReleaseTitleForSonarrAddsEpisodeToExistingSeasonTag(t *testing.T) {
+	got := normalizeBluDVReleaseTitleForSonarr("Rick and Morty S01 Episodio 1 Torrent - WEB-DL 1080p")
+	want := "Rick and Morty S01E01 Episodio 1 Torrent - WEB-DL 1080p"
+
+	if got != want {
+		t.Fatalf("normalizeBluDVReleaseTitleForSonarr() = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeBluDVReleaseTitleForSonarrDoesNotDuplicateEpisodeTag(t *testing.T) {
+	got := normalizeBluDVReleaseTitleForSonarr("Rick and Morty S01E01 Torrent - WEB-DL 1080p")
+	want := "Rick and Morty S01E01 Torrent - WEB-DL 1080p"
+
+	if got != want {
+		t.Fatalf("normalizeBluDVReleaseTitleForSonarr() = %q, want %q", got, want)
+	}
+}
+
 func TestNormalizeBluDVReleaseTitleForSonarrDoesNotDuplicateSeasonTag(t *testing.T) {
 	got := normalizeBluDVReleaseTitleForSonarr("Rick and Morty S01 1a Temporada Torrent")
 	want := "Rick and Morty S01 1a Temporada Torrent"

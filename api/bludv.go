@@ -34,7 +34,9 @@ var (
 	bludvTemporadaEpisodeRE    = regexp.MustCompile(`(?i)\btemporada\s+0*([0-9]{1,3})\s+epis.?dio\s+0*([0-9]{1,3})\b`)
 	bludvSeasonOnlyQueryRE     = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}\b|\be0*[0-9]{1,3}\b|\btemporada\s+0*[0-9]{1,3}\b|\bepis.?dio\s+0*[0-9]{1,3}\b`)
 	bludvSeasonInReleaseNameRE = regexp.MustCompile(`(?i)\b0*([0-9]{1,3})\D{0,6}temporada\b|\btemporada\D{0,6}0*([0-9]{1,3})\b|\bs0*([0-9]{1,3})(?:[\s._-]*e0*[0-9]{1,3})?\b`)
+	bludvEpisodeInReleaseRE    = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}[\s._-]*e0*([0-9]{1,3})\b|\be0*([0-9]{1,3})\b|\bep(?:is.?dio|isode)?\.?\s*0*([0-9]{1,3})\b`)
 	bludvConjunctionQueryRE    = regexp.MustCompile(`(?i)\b(and|es|y|et)\b`)
+	bludvSonarrSeasonEpisodeRE = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}[\s._-]*e0*[0-9]{1,3}\b`)
 	bludvSonarrSeasonRE        = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}\b`)
 	bludvNonWordRE             = regexp.MustCompile(`[^a-z0-9]+`)
 )
@@ -307,6 +309,21 @@ func extractBluDVSeason(text string) string {
 	return ""
 }
 
+func extractBluDVEpisode(text string) string {
+	matches := bludvEpisodeInReleaseRE.FindStringSubmatch(text)
+	if len(matches) == 0 {
+		return ""
+	}
+
+	for _, match := range matches[1:] {
+		if match != "" {
+			return normalizeBluDVSeasonNumber(match)
+		}
+	}
+
+	return ""
+}
+
 func matchesBluDVRequestedTitle(q, title string) bool {
 	requestedTokens := bludvRequestedTitleTokens(q)
 	if len(requestedTokens) == 0 {
@@ -387,8 +404,17 @@ func normalizeBluDVSeasonNumber(season string) string {
 
 func normalizeBluDVReleaseTitleForSonarr(title string) string {
 	title = strings.TrimSpace(title)
-	if title == "" || bludvSonarrSeasonRE.MatchString(title) {
+	if title == "" || bludvSonarrSeasonEpisodeRE.MatchString(title) {
 		return title
+	}
+
+	episode := extractBluDVEpisode(title)
+	if bludvSonarrSeasonRE.MatchString(title) {
+		if episode == "" {
+			return title
+		}
+
+		return addBluDVEpisodeToExistingSonarrSeason(title, episode)
 	}
 
 	season := extractBluDVSeason(title)
@@ -398,16 +424,44 @@ func normalizeBluDVReleaseTitleForSonarr(title string) string {
 
 	matches := bludvSeasonInReleaseNameRE.FindStringIndex(title)
 	if len(matches) == 0 {
-		return fmt.Sprintf("%s %s", title, formatBluDVSeasonTag(season))
+		return fmt.Sprintf("%s %s", title, formatBluDVReleaseTag(season, episode))
 	}
 
 	prefix := strings.TrimSpace(title[:matches[0]])
 	suffix := strings.TrimSpace(title[matches[0]:])
 	if prefix == "" {
-		return fmt.Sprintf("%s %s", formatBluDVSeasonTag(season), suffix)
+		return fmt.Sprintf("%s %s", formatBluDVReleaseTag(season, episode), suffix)
 	}
 
-	return fmt.Sprintf("%s %s %s", prefix, formatBluDVSeasonTag(season), suffix)
+	return fmt.Sprintf("%s %s %s", prefix, formatBluDVReleaseTag(season, episode), suffix)
+}
+
+func addBluDVEpisodeToExistingSonarrSeason(title, episode string) string {
+	matches := bludvSonarrSeasonRE.FindStringIndex(title)
+	if len(matches) == 0 {
+		return title
+	}
+
+	season := extractBluDVSeason(title[matches[0]:matches[1]])
+	if season == "" {
+		return title
+	}
+
+	return fmt.Sprintf(
+		"%s%s%s",
+		title[:matches[0]],
+		formatBluDVReleaseTag(season, episode),
+		title[matches[1]:],
+	)
+}
+
+func formatBluDVReleaseTag(season, episode string) string {
+	tag := formatBluDVSeasonTag(season)
+	if episode != "" {
+		tag += formatBluDVEpisodeTag(episode)
+	}
+
+	return tag
 }
 
 func formatBluDVSeasonTag(season string) string {
@@ -416,6 +470,14 @@ func formatBluDVSeasonTag(season string) string {
 	}
 
 	return "S" + season
+}
+
+func formatBluDVEpisodeTag(episode string) string {
+	if len(episode) == 1 {
+		episode = "0" + episode
+	}
+
+	return "E" + episode
 }
 
 func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]schema.IndexedTorrent, error) {
