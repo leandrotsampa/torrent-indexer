@@ -26,7 +26,18 @@ var bludv = IndexerMeta{
 	PagePattern: "page/%s",
 }
 
-var bludvSeasonEpisodeQueryRE = regexp.MustCompile(`(?i)\bs0*(\d{1,3})[\s._-]*e0*(\d{1,3})\b`)
+const bludvMaxSeasonSearchPages = 3
+
+var (
+	bludvSeasonEpisodeQueryRE  = regexp.MustCompile(`(?i)\bs0*([0-9]{1,3})[\s._-]*e0*([0-9]{1,3})\b`)
+	bludvTemporadaEpisodeRE    = regexp.MustCompile(`(?i)\btemporada\s+0*([0-9]{1,3})\s+epis.?dio\s+0*([0-9]{1,3})\b`)
+	bludvSeasonInReleaseNameRE = regexp.MustCompile(`(?i)\b0*([0-9]{1,3})\D{0,6}temporada\b|\btemporada\D{0,6}0*([0-9]{1,3})\b|\bs0*([0-9]{1,3})(?:[\s._-]*e0*[0-9]{1,3})?\b`)
+)
+
+type bludvSearchLink struct {
+	URL   string
+	Title string
+}
 
 func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
@@ -39,20 +50,14 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	// supported query params: q, season, episode, page, filter_results
-	q := normalizeBluDVSearchQuery(r.URL.Query().Get("q"))
+	rawQ := r.URL.Query().Get("q")
+	q := normalizeBluDVSearchQuery(rawQ)
 	page := r.URL.Query().Get("page")
+	requestedSeason := extractBluDVSeason(rawQ)
+	targetURL := buildBluDVURL(metadata, q, page)
 
-	// URL encode query param
-	q = url.QueryEscape(q)
-	url := metadata.URL
-	if page != "" {
-		url = fmt.Sprintf(fmt.Sprintf("%s%s", url, metadata.PagePattern), page)
-	} else {
-		url = fmt.Sprintf("%s%s%s", url, metadata.SearchURL, q)
-	}
-
-	logging.InfoWithRequest(r).Str("target_url", url).Msg("Processing indexer request")
-	resp, err := i.requester.GetDocument(ctx, url)
+	logging.InfoWithRequest(r).Str("target_url", targetURL).Msg("Processing indexer request")
+	resp, err := i.requester.GetDocument(ctx, targetURL)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		err = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -76,21 +81,38 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var links []string
-	doc.Find(".post").Each(func(i int, s *goquery.Selection) {
-		// get link from h2.entry-title > a
-		link, _ := s.Find("div.title > a").Attr("href")
-		links = append(links, link)
-	})
+	links := extractBluDVSearchLinks(doc)
+	if requestedSeason != "" && q != "" {
+		links = filterBluDVSearchLinksBySeason(requestedSeason, links)
+
+		for pageNum := 2; len(links) == 0 && page == "" && pageNum <= bludvMaxSeasonSearchPages; pageNum++ {
+			nextURL := buildBluDVURL(metadata, q, fmt.Sprintf("%d", pageNum))
+			nextResp, err := i.requester.GetDocument(ctx, nextURL)
+			if err != nil {
+				logging.WarnWithRequest(r).Err(err).Str("target_url", nextURL).Msg("Failed to fetch BLUDV search page")
+				break
+			}
+
+			nextDoc, err := goquery.NewDocumentFromReader(nextResp)
+			_ = nextResp.Close()
+			if err != nil {
+				logging.WarnWithRequest(r).Err(err).Str("target_url", nextURL).Msg("Failed to parse BLUDV search page")
+				break
+			}
+
+			links = filterBluDVSearchLinksBySeason(requestedSeason, extractBluDVSearchLinks(nextDoc))
+		}
+	}
+	linkURLs := bludvSearchLinkURLs(links)
 
 	// if no links were indexed, expire the document in cache
-	if len(links) == 0 {
-		_ = i.requester.ExpireDocument(ctx, url)
+	if len(linkURLs) == 0 {
+		_ = i.requester.ExpireDocument(ctx, targetURL)
 	}
 
 	// extract each torrent link
-	indexedTorrents := utils.ParallelFlatMap(links, func(link string) ([]schema.IndexedTorrent, error) {
-		return getTorrentsBluDV(ctx, i, link, url)
+	indexedTorrents := utils.ParallelFlatMap(linkURLs, func(link string) ([]schema.IndexedTorrent, error) {
+		return getTorrentsBluDV(ctx, i, link, targetURL)
 	})
 
 	// Apply post-processors
@@ -98,6 +120,7 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 	for _, processor := range i.postProcessors {
 		postProcessedTorrents = processor(i, r, postProcessedTorrents)
 	}
+	postProcessedTorrents = filterBluDVSeasonResults(rawQ, postProcessedTorrents)
 
 	w.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(w).Encode(Response{
@@ -110,13 +133,118 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func buildBluDVURL(metadata IndexerMeta, q, page string) string {
+	if page != "" {
+		if q != "" {
+			return fmt.Sprintf("%spage/%s/?s=%s", metadata.URL, page, url.QueryEscape(q))
+		}
+
+		return fmt.Sprintf(fmt.Sprintf("%s%s", metadata.URL, metadata.PagePattern), page)
+	}
+
+	return fmt.Sprintf("%s%s%s", metadata.URL, metadata.SearchURL, url.QueryEscape(q))
+}
+
+func extractBluDVSearchLinks(doc *goquery.Document) []bludvSearchLink {
+	var links []bludvSearchLink
+	doc.Find(".post").Each(func(i int, s *goquery.Selection) {
+		linkNode := s.Find("div.title > a")
+		link, _ := linkNode.Attr("href")
+		title := strings.TrimSpace(linkNode.Text())
+		if title == "" {
+			title, _ = linkNode.Attr("title")
+		}
+		if link != "" {
+			links = append(links, bludvSearchLink{URL: link, Title: title})
+		}
+	})
+
+	return links
+}
+
+func filterBluDVSearchLinksBySeason(requestedSeason string, links []bludvSearchLink) []bludvSearchLink {
+	filtered := make([]bludvSearchLink, 0, len(links))
+	for _, link := range links {
+		season := extractBluDVSeason(fmt.Sprintf("%s %s", link.Title, link.URL))
+		if season == requestedSeason {
+			filtered = append(filtered, link)
+		}
+	}
+
+	return filtered
+}
+
+func bludvSearchLinkURLs(links []bludvSearchLink) []string {
+	urls := make([]string, 0, len(links))
+	for _, link := range links {
+		urls = append(urls, link.URL)
+	}
+
+	return urls
+}
+
 func normalizeBluDVSearchQuery(q string) string {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return q
 	}
 
-	return bludvSeasonEpisodeQueryRE.ReplaceAllString(q, "temporada $1 episodio $2")
+	q = replaceBluDVSeasonEpisodeWithSeason(q, bludvSeasonEpisodeQueryRE)
+	q = replaceBluDVSeasonEpisodeWithSeason(q, bludvTemporadaEpisodeRE)
+
+	return strings.Join(strings.Fields(q), " ")
+}
+
+func replaceBluDVSeasonEpisodeWithSeason(q string, re *regexp.Regexp) string {
+	return re.ReplaceAllStringFunc(q, func(match string) string {
+		parts := re.FindStringSubmatch(match)
+		if len(parts) < 2 {
+			return match
+		}
+
+		return fmt.Sprintf("temporada %s", normalizeBluDVSeasonNumber(parts[1]))
+	})
+}
+
+func filterBluDVSeasonResults(q string, torrents []schema.IndexedTorrent) []schema.IndexedTorrent {
+	requestedSeason := extractBluDVSeason(q)
+	if requestedSeason == "" {
+		return torrents
+	}
+
+	filtered := make([]schema.IndexedTorrent, 0, len(torrents))
+	for _, it := range torrents {
+		season := extractBluDVSeason(fmt.Sprintf("%s %s %s", it.Title, it.OriginalTitle, it.Details))
+		if season == requestedSeason {
+			filtered = append(filtered, it)
+		}
+	}
+
+	return filtered
+}
+
+func extractBluDVSeason(text string) string {
+	matches := bludvSeasonInReleaseNameRE.FindStringSubmatch(text)
+	if len(matches) == 0 {
+		return ""
+	}
+
+	for _, match := range matches[1:] {
+		if match != "" {
+			return normalizeBluDVSeasonNumber(match)
+		}
+	}
+
+	return ""
+}
+
+func normalizeBluDVSeasonNumber(season string) string {
+	season = strings.TrimLeft(season, "0")
+	if season == "" {
+		return "0"
+	}
+
+	return season
 }
 
 func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]schema.IndexedTorrent, error) {

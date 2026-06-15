@@ -108,7 +108,7 @@ search:
   keywordsfilters:
     - name: tolower
     - name: re_replace
-      args: ["(?i)\\bs0*(\\d{1,3})[\\s._-]*e0*(\\d{1,3})\\b", "temporada $1 episodio $2"]
+      args: ["(?i)\\bs0*(\\d{1,3})[\\s._-]*e0*(\\d{1,3})\\b", "temporada $1"]
 
   rows:
     selector: $.results
@@ -200,7 +200,7 @@ search:
   keywordsfilters:
     - name: tolower
     - name: re_replace
-      args: ["(?i)\\bs0*(\\d{1,3})[\\s._-]*e0*(\\d{1,3})\\b", "temporada $1 episodio $2"]
+      args: ["(?i)\\bs0*(\\d{1,3})[\\s._-]*e0*(\\d{1,3})\\b", "temporada $1"]
     - name: re_replace
       args: ["(?i)\\bs0*(\\d{1,3})$", "temporada $1"]
 
