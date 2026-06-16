@@ -224,3 +224,43 @@ func TestNormalizeBluDVReleaseQualityForSonarrUsesMagnetDisplayNameQuality(t *te
 		t.Fatalf("normalizeBluDVReleaseQualityForSonarr() = %q, want %q", got, want)
 	}
 }
+
+func TestNormalizeBluDVReleaseQualityFromLabelForSonarr(t *testing.T) {
+	title := "Rick and Morty S04 4a Temporada Torrent - WEB-DL 720p/1080p Dual Audio (eng)"
+
+	got := normalizeBluDVReleaseQualityFromLabelForSonarr(title, "1080p")
+	want := "Rick and Morty S04 4a Temporada Torrent - WEB-DL 1080p Dual Audio (eng)"
+
+	if got != want {
+		t.Fatalf("normalizeBluDVReleaseQualityFromLabelForSonarr() = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeBluDVReleaseQualityFromLabelForSonarrUsesContextBeforeButton(t *testing.T) {
+	title := "Rick and Morty S04 4a Temporada Torrent - WEB-DL 720p/1080p Dual Audio (eng)"
+
+	got := normalizeBluDVReleaseQualityFromLabelForSonarr(title, "WEB-DL 1080p (9.79 GB) Magnet-Link")
+	want := "Rick and Morty S04 4a Temporada Torrent - WEB-DL 1080p Dual Audio (eng)"
+
+	if got != want {
+		t.Fatalf("normalizeBluDVReleaseQualityFromLabelForSonarr() = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeBluDVReleaseEpisodeForSonarrAddsEpisodeToSeasonTag(t *testing.T) {
+	got := normalizeBluDVReleaseEpisodeForSonarr("Rick and Morty S04 4a Temporada Torrent - WEB-DL 1080p", "1")
+	want := "Rick and Morty S04E01 4a Temporada Torrent - WEB-DL 1080p"
+
+	if got != want {
+		t.Fatalf("normalizeBluDVReleaseEpisodeForSonarr() = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeBluDVReleaseEpisodeForSonarrDoesNotDuplicateEpisodeTag(t *testing.T) {
+	got := normalizeBluDVReleaseEpisodeForSonarr("Rick and Morty S04E01 4a Temporada Torrent - WEB-DL 1080p", "1")
+	want := "Rick and Morty S04E01 4a Temporada Torrent - WEB-DL 1080p"
+
+	if got != want {
+		t.Fatalf("normalizeBluDVReleaseEpisodeForSonarr() = %q, want %q", got, want)
+	}
+}
