@@ -30,6 +30,16 @@ var bludv = IndexerMeta{
 
 const bludvMaxSeasonSearchPages = 3
 
+var bludvTransmissionTrackers = []string{
+	"udp://tracker.openbittorrent.com:80/announce",
+	"udp://tracker.opentrackr.org:1337/announce",
+	"udp://tracker.trackerfix.com:80/announce",
+	"udp://p4p.arenabg.com:1337/announce",
+	"udp://explodie.org:6969/announce",
+	"udp://open.stealth.si:80/announce",
+	"https://tracker.yemekyedim.com:443/announce",
+}
+
 var (
 	bludvSeasonEpisodeQueryRE  = regexp.MustCompile(`(?i)\bs0*([0-9]{1,3})[\s._-]*e0*([0-9]{1,3})\b`)
 	bludvTemporadaEpisodeRE    = regexp.MustCompile(`(?i)\btemporada\s+0*([0-9]{1,3})\s+epis.?dio\s+0*([0-9]{1,3})\b`)
@@ -596,6 +606,11 @@ func bludvResolutionRank(resolution string) int {
 	}
 }
 
+func shouldAppendBluDVTransmissionTrackers() bool {
+	value := strings.ToLower(strings.TrimSpace(utils.GetEnvOrDefault("INDEXER_BLUDV_APPEND_TRACKERS", "false")))
+	return value == "1" || value == "true" || value == "yes"
+}
+
 func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]schema.IndexedTorrent, error) {
 	var indexedTorrents []schema.IndexedTorrent
 	doc, err := getDocument(ctx, i, link, referer)
@@ -737,6 +752,11 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 			title = normalizeBluDVReleaseTitleForSonarr(title)
 			title = normalizeBluDVReleaseQualityForSonarr(title, releaseTitle, it, len(magnetLinks), size)
 
+			downloadMagnetLink := magnetLink
+			if shouldAppendBluDVTransmissionTrackers() {
+				downloadMagnetLink = appendTrackersToMagnetLink(downloadMagnetLink, bludvTransmissionTrackers)
+			}
+
 			ixt := schema.IndexedTorrent{
 				Title:         releaseTitle,
 				OriginalTitle: title,
@@ -744,7 +764,7 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 				Year:          year,
 				IMDB:          imdbLink,
 				Audio:         magnetAudio,
-				MagnetLink:    magnetLink,
+				MagnetLink:    downloadMagnetLink,
 				Date:          date,
 				InfoHash:      infoHash,
 				Trackers:      trackers,

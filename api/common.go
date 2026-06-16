@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
 	"github.com/Erickfb/torrent-indexer/logging"
 	"github.com/Erickfb/torrent-indexer/schema"
 	"github.com/Erickfb/torrent-indexer/utils"
+	"github.com/PuerkitoBio/goquery"
 )
 
 // getDocument retrieves a document from the cache or makes a request to get it.
@@ -256,6 +256,45 @@ func getMagnetFromSystemAds(ctx context.Context, i *Indexer, link, referer strin
 	}
 
 	return magnetLink, nil
+}
+
+func appendTrackersToMagnetLink(magnetLink string, trackers []string) string {
+	if len(trackers) == 0 || !strings.HasPrefix(magnetLink, "magnet:?") {
+		return magnetLink
+	}
+
+	parsedURL, err := url.Parse(magnetLink)
+	if err != nil || parsedURL.Scheme != "magnet" {
+		return magnetLink
+	}
+
+	query := parsedURL.Query()
+	existingTrackers := map[string]bool{}
+	for _, tracker := range query["tr"] {
+		existingTrackers[tracker] = true
+	}
+
+	var encodedTrackers []string
+	for _, tracker := range trackers {
+		tracker = strings.TrimSpace(tracker)
+		if tracker == "" || existingTrackers[tracker] {
+			continue
+		}
+
+		encodedTrackers = append(encodedTrackers, "tr="+url.QueryEscape(tracker))
+		existingTrackers[tracker] = true
+	}
+
+	if len(encodedTrackers) == 0 {
+		return magnetLink
+	}
+
+	separator := "&"
+	if strings.HasSuffix(magnetLink, "?") || strings.HasSuffix(magnetLink, "&") {
+		separator = ""
+	}
+
+	return magnetLink + separator + strings.Join(encodedTrackers, "&")
 }
 
 // appendAudioISO639_2Code appends the audio languages to the title in ISO 639-2 code format.

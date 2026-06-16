@@ -64,6 +64,7 @@ You can configure the server using the following environment variables:
 - `INDEXER_<NAME>_URL`: (optional) Set a custom URL for the indexer. Where the "NAME" will be always uppercase indexer key with underscores. ex: `INDEXER_DODO_FILMES_URL=https://my-proxied-dodo-url.org`
     - `comando_torrents` supports both `INDEXER_COMANDO_TORRENTS_URL` and the legacy `INDEXER_COMANDO_URL`.
     - `erai_raws` defaults to `https://www.erai-raws.info/` and supports `INDEXER_ERAI_RAWS_URL`.
+- `INDEXER_BLUDV_APPEND_TRACKERS`: (optional) Append a short, stable tracker list to BLUDV magnet links while preserving the original `xt` first. Useful for Transmission setups that do not resolve hash-only magnets reliably. Default: `false`.
 - `INDEXER_ERAI_RAWS_RSS_URL`: (optional, recommended) Full authenticated Erai-raws RSS URL. Use this if your Erai-raws account provides a personal RSS/token URL.
 - `ERAI_RAWS_AUTH_TOKEN`: (optional) Authentication token for Erai-raws feeds.
 - `ERAI_RAWS_AUTH_QUERY_PARAM`: (optional) Query parameter name for `ERAI_RAWS_AUTH_TOKEN`. Default: `token`.
