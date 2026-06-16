@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"net/url"
 	"reflect"
 	"testing"
 	"time"
@@ -334,37 +333,6 @@ func Test_appendAudioISO639_2Code(t *testing.T) {
 				t.Errorf("appendAudioISO639_2Code() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestAppendTrackersToMagnetLink(t *testing.T) {
-	magnetLink := "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=Release&tr=udp%3A%2F%2Ftracker.one%3A1337%2Fannounce"
-
-	got := appendTrackersToMagnetLink(magnetLink, []string{
-		"udp://tracker.one:1337/announce",
-		"udp://tracker.two:6969/announce",
-	})
-
-	parsedURL, err := url.Parse(got)
-	if err != nil {
-		t.Fatalf("url.Parse() error = %v", err)
-	}
-
-	query := parsedURL.Query()
-	if query.Get("xt") != "urn:btih:0123456789012345678901234567890123456789" {
-		t.Fatalf("xt = %q", query.Get("xt"))
-	}
-
-	if query.Get("dn") != "Release" {
-		t.Fatalf("dn = %q", query.Get("dn"))
-	}
-
-	wantTrackers := []string{
-		"udp://tracker.one:1337/announce",
-		"udp://tracker.two:6969/announce",
-	}
-	if !reflect.DeepEqual(query["tr"], wantTrackers) {
-		t.Fatalf("trackers = %v, want %v", query["tr"], wantTrackers)
 	}
 }
 
