@@ -10,6 +10,25 @@ import (
 	"github.com/Erickfb/torrent-indexer/schema"
 )
 
+func Test_extractSystemAdsMagnet(t *testing.T) {
+	body := `<script>window.location.href="magnet:?xt=urn:btih:ABC123\u0026tr=udp%3A%2F%2Ftracker.example%2Fannounce";</script>`
+
+	got := extractSystemAdsMagnet(body)
+	want := "magnet:?xt=urn:btih:ABC123&tr=udp%3A%2F%2Ftracker.example%2Fannounce"
+
+	if got != want {
+		t.Fatalf("extractSystemAdsMagnet() = %q, want %q", got, want)
+	}
+}
+
+func Test_extractSystemAdsMagnetReturnsEmptyWhenMissing(t *testing.T) {
+	got := extractSystemAdsMagnet(`<script>redirect = "/go.php?id=abc"</script>`)
+
+	if got != "" {
+		t.Fatalf("extractSystemAdsMagnet() = %q, want empty", got)
+	}
+}
+
 func Test_getPublishedDateFromRawString(t *testing.T) {
 	type args struct {
 		dateStr string

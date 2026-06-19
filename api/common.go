@@ -222,7 +222,23 @@ func getIMDBLink(link string) (string, error) {
 	return imdbLink, nil
 }
 
-var redirectAdIDRE = regexp.MustCompile(`redirect\s*=\s*"[^"]*[?&]id=([^"&]+)`)
+var (
+	redirectAdIDRE      = regexp.MustCompile(`redirect\s*=\s*"[^"]*[?&]id=([^"&]+)`)
+	systemAdsMagnetRE   = regexp.MustCompile(`magnet:\?[^"'<>\s]+`)
+	escapedURLAmpersand = strings.NewReplacer(`\u0026`, "&", `\x26`, "&")
+)
+
+func extractSystemAdsMagnet(bodyText string) string {
+	magnetLink := systemAdsMagnetRE.FindString(bodyText)
+	if magnetLink == "" {
+		return ""
+	}
+
+	magnetLink = escapedURLAmpersand.Replace(magnetLink)
+	magnetLink = html.UnescapeString(magnetLink)
+
+	return strings.TrimSpace(magnetLink)
+}
 
 func getMagnetFromSystemAds(ctx context.Context, i *Indexer, link, referer string) (string, error) {
 	resp, err := i.requester.GetDocument(ctx, link, referer)
@@ -237,6 +253,10 @@ func getMagnetFromSystemAds(ctx context.Context, i *Indexer, link, referer strin
 	}
 
 	bodyText := html.UnescapeString(string(body))
+	if magnetLink := extractSystemAdsMagnet(bodyText); magnetLink != "" {
+		return magnetLink, nil
+	}
+
 	matches := redirectAdIDRE.FindStringSubmatch(bodyText)
 	if len(matches) < 2 {
 		return "", fmt.Errorf("redirectad id not found")
