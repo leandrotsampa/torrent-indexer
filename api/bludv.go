@@ -52,7 +52,7 @@ var (
 	bludvMultiResolutionRE     = regexp.MustCompile(`(?i)\b(?:480p|720p|1080p|2160p|4k)\b(?:\s*(?:[/|,]|\bor\b|\band\b|\be\b|\bou\b)\s*\b(?:480p|720p|1080p|2160p|4k)\b)+`)
 	bludvResolutionRE          = regexp.MustCompile(`(?i)\b(?:480p|720p|1080p|2160p|4k)\b`)
 	bludvNonWordRE             = regexp.MustCompile(`[^a-z0-9]+`)
-	bludvSystemAdsAnchorRE     = regexp.MustCompile(`(?is)<a\s+[^>]*href=["']([^"']*systemads\.net/go\.php[^"']*)["'][^>]*>(.*?)</a>`)
+	bludvSystemAdsAnchorRE     = regexp.MustCompile(`(?is)<a\s+[^>]*href=["']([^"']*systemads\d*\.[a-z]+/go\.php[^"']*)["'][^>]*>(.*?)</a>`)
 	bludvHTMLTagRE             = regexp.MustCompile(`(?is)<[^>]+>`)
 )
 

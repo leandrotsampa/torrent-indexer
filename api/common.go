@@ -253,6 +253,16 @@ func isAdGatewayLink(href string) bool {
 }
 
 func getMagnetFromSystemAds(ctx context.Context, i *Indexer, link, referer string) (string, error) {
+	// Fast path: some gateways (e.g. systemads1.com) embed the real link as an
+	// AES-GCM payload in the "id" query param, decodable offline with no request.
+	if u, err := url.Parse(link); err == nil {
+		if id := u.Query().Get("id"); id != "" {
+			if decoded, derr := utils.DecodeDarkmahouAdLink(id, ""); derr == nil && strings.HasPrefix(decoded, "magnet:") {
+				return decoded, nil
+			}
+		}
+	}
+
 	resp, err := i.requester.GetDocument(ctx, link, referer)
 	if err != nil {
 		return "", err
