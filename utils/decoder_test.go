@@ -98,6 +98,63 @@ func TestBase64Decode(t *testing.T) {
 	}
 }
 
+func TestDecodeDarkmahouAdLink(t *testing.T) {
+	tests := []struct {
+		name    string
+		encoded string
+		key     string
+		want    string
+		wantErr bool
+	}{
+		{
+			// Real payload captured from darkmahou.io (systemads1.com id, URL-decoded).
+			name:    "Valid AES-GCM payload with default key",
+			encoded: "1SnpMY5XUh5b7/EmQqNoMEmORRapXlBH2tyXZisSQaH/xF+R+UevXcMzCUfVT63/Hj6Mwf1dmnyNFdUaB4jIuOB+qPu712OPc4Fj5P1ctV5UkF1zuIZ0q8H1R0Zd84cTQdodNCK10WixkskMZbssbvq8eQ==",
+			key:     "",
+			want:    "https://jottacloud.com/s/383b50dcf76d12c460cad2dd08f3c97d963",
+			wantErr: false,
+		},
+		{
+			name:    "Wrong key fails authentication",
+			encoded: "1SnpMY5XUh5b7/EmQqNoMEmORRapXlBH2tyXZisSQaH/xF+R+UevXcMzCUfVT63/Hj6Mwf1dmnyNFdUaB4jIuOB+qPu712OPc4Fj5P1ctV5UkF1zuIZ0q8H1R0Zd84cTQdodNCK10WixkskMZbssbvq8eQ==",
+			key:     "chave-errada",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "Invalid base64",
+			encoded: "not valid base64!!!",
+			key:     "",
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name:    "Empty string",
+			encoded: "",
+			key:     "",
+			want:    "",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, gotErr := utils.DecodeDarkmahouAdLink(tt.encoded, tt.key)
+			if gotErr != nil {
+				if !tt.wantErr {
+					t.Errorf("DecodeDarkmahouAdLink() failed: %v", gotErr)
+				}
+				return
+			}
+			if tt.wantErr {
+				t.Fatal("DecodeDarkmahouAdLink() succeeded unexpectedly")
+			}
+			if got != tt.want {
+				t.Errorf("DecodeDarkmahouAdLink() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDecodeStarckDataU(t *testing.T) {
 	tests := []struct {
 		name    string

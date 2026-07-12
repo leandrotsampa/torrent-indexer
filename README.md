@@ -18,6 +18,7 @@ Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org
 - [rede-torrent](https://redetorrent.com/)
 - [vaca-torrent](https://vaqueirofilmes.com/)
 - [erai-raws](https://www.erai-raws.info/)
+- [darkmahou](https://darkmahou.io/)
 
 ## Deploy
 
@@ -191,6 +192,7 @@ settings:
       rede_torrent: Rede Torrent
       vaca_torrent: Vaca Torrent
       erai_raws: Erai-raws
+      darkmahou: Darkmahou
 
 search:
   paths:
