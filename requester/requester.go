@@ -19,7 +19,11 @@ const (
 	cacheKey = "shortLivedCache"
 )
 
-var challangeRegex = regexp.MustCompile(`(?i)(just a moment|cf-chl-bypass|under attack|cf-mitigated|challenge-platform)`)
+// Markers of a real Cloudflare interstitial/challenge. Note: "challenge-platform"
+// is intentionally NOT here — Cloudflare injects /cdn-cgi/challenge-platform/
+// scripts into normal 200 pages too, so matching it produces false positives
+// that discard valid content (e.g. ad-gateway pages that carry the magnet).
+var challangeRegex = regexp.MustCompile(`(?i)(just a moment|cf-chl-bypass|under attack|cf-mitigated)`)
 
 type Requster struct {
 	fs                        *FlareSolverr
