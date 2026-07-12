@@ -177,10 +177,17 @@ func (f *FlareSolverr) ListSessions() ([]string, error) {
 
 	defer resp.Body.Close()
 
+	// Some FlareSolverr-compatible servers (e.g. Byparr) do not implement the
+	// sessions API and answer with a non-JSON 500. Treat any such failure as
+	// "sessions unsupported" so the caller falls back to a sessionless pool
+	// instead of disabling FlareSolverr entirely.
+	if resp.StatusCode != http.StatusOK {
+		return nil, ErrListSessions
+	}
+
 	var sessionsResponse map[string]interface{}
-	err = json.NewDecoder(resp.Body).Decode(&sessionsResponse)
-	if err != nil {
-		return nil, err
+	if err := json.NewDecoder(resp.Body).Decode(&sessionsResponse); err != nil {
+		return nil, ErrListSessions
 	}
 	if sessionsResponse["sessions"] == nil {
 		return nil, ErrListSessions
