@@ -150,6 +150,25 @@ func getTorrents(ctx context.Context, i *Indexer, link, referer string) ([]schem
 		magnetLinks = append(magnetLinks, magnetLink)
 	})
 
+	// resolve ad-gateway links (e.g. systemads.net/go.php) that hide the real
+	// magnet behind a redirect chain ending in a page with the magnet in body.
+	seenGatewayMagnet := map[string]bool{}
+	textContent.Find("a[href]").Each(func(_ int, s *goquery.Selection) {
+		href, _ := s.Attr("href")
+		if !isAdGatewayLink(href) {
+			return
+		}
+		magnetLink, err := getMagnetFromSystemAds(ctx, i, strings.TrimSpace(href), link)
+		if err != nil {
+			logging.Warn().Err(err).Str("href", href).Str("indexer", comando.Label).Msg("Failed to resolve ad-gateway link")
+			return
+		}
+		if strings.HasPrefix(magnetLink, "magnet:") && !seenGatewayMagnet[magnetLink] {
+			seenGatewayMagnet[magnetLink] = true
+			magnetLinks = append(magnetLinks, magnetLink)
+		}
+	})
+
 	var audio []schema.Audio
 	var year string
 	var size []string

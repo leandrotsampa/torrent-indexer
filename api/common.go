@@ -240,6 +240,18 @@ func extractSystemAdsMagnet(bodyText string) string {
 	return strings.TrimSpace(magnetLink)
 }
 
+// adGatewayLinkRE matches ad-gateway "go/links.php?id=" URLs that hide the real
+// magnet behind an ad redirect chain (e.g. systemads.net -> videosad.net, which
+// serves the magnet in the final page body). Host-agnostic so it survives the
+// frequent domain changes of these gateways.
+var adGatewayLinkRE = regexp.MustCompile(`(?i)^https?://[^/]+/(?:go|links?|out|get)\.php\?[^"']*\bid=`)
+
+// isAdGatewayLink reports whether href is an ad-gateway link resolvable to a
+// magnet via getMagnetFromSystemAds.
+func isAdGatewayLink(href string) bool {
+	return adGatewayLinkRE.MatchString(strings.TrimSpace(href))
+}
+
 func getMagnetFromSystemAds(ctx context.Context, i *Indexer, link, referer string) (string, error) {
 	resp, err := i.requester.GetDocument(ctx, link, referer)
 	if err != nil {
