@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Erickfb/torrent-indexer/schema"
+	"github.com/leandrotsampa/torrent-indexer/schema"
 )
 
 func TestFallbackPostTitleUsesOriginalTitleByDefault(t *testing.T) {

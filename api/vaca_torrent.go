@@ -17,11 +17,11 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/Erickfb/torrent-indexer/logging"
-	"github.com/Erickfb/torrent-indexer/magnet"
-	"github.com/Erickfb/torrent-indexer/schema"
-	goscrape "github.com/Erickfb/torrent-indexer/scrape"
-	"github.com/Erickfb/torrent-indexer/utils"
+	"github.com/leandrotsampa/torrent-indexer/logging"
+	"github.com/leandrotsampa/torrent-indexer/magnet"
+	"github.com/leandrotsampa/torrent-indexer/schema"
+	goscrape "github.com/leandrotsampa/torrent-indexer/scrape"
+	"github.com/leandrotsampa/torrent-indexer/utils"
 )
 
 var vacaTorrent = IndexerMeta{

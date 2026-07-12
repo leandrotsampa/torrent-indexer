@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Erickfb/torrent-indexer/cache"
-	"github.com/Erickfb/torrent-indexer/logging"
-	"github.com/Erickfb/torrent-indexer/monitoring"
-	"github.com/Erickfb/torrent-indexer/utils"
+	"github.com/leandrotsampa/torrent-indexer/cache"
+	"github.com/leandrotsampa/torrent-indexer/logging"
+	"github.com/leandrotsampa/torrent-indexer/monitoring"
+	"github.com/leandrotsampa/torrent-indexer/utils"
 )
 
 type peers struct {

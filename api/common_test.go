@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Erickfb/torrent-indexer/schema"
+	"github.com/leandrotsampa/torrent-indexer/schema"
 )
 
 func Test_extractSystemAdsMagnet(t *testing.T) {

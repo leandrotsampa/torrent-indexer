@@ -24,13 +24,13 @@ Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org
 If you have Docker + docker-compose installed, you can deploy it using the following command:
 
 ```bash
-curl -s https://raw.githubusercontent.com/Erickfb/torrent-indexer/main/docker-compose.yml > docker-compose.yml
+curl -s https://raw.githubusercontent.com/leandrotsampa/torrent-indexer/main/docker-compose.yml > docker-compose.yml
 docker-compose up -d
 ```
 
 The server will be available at [http://localhost:8080/](http://localhost:8080/).
 
-Docker image: `ghcr.io/erickfb/torrent-indexer:latest`
+Docker image: `ghcr.io/leandrotsampa/torrent-indexer:latest`
 
 ## Configuration
 
@@ -159,7 +159,7 @@ You can integrate this indexer with Prowlarr by adding a custom definition. See 
 ---
 id: torrent-indexer
 name: Torrent Indexer
-description: "Indexing Brazilian Torrent websites into structured data. github.com/Erickfb/torrent-indexer"
+description: "Indexing Brazilian Torrent websites into structured data. github.com/leandrotsampa/torrent-indexer"
 language: pt-BR
 type: public
 encoding: UTF-8

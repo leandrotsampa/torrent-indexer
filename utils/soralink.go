@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Erickfb/torrent-indexer/cache"
-	"github.com/Erickfb/torrent-indexer/logging"
+	"github.com/leandrotsampa/torrent-indexer/cache"
+	"github.com/leandrotsampa/torrent-indexer/logging"
 )
 
 // SoraLinkFetcher handles fetching links from SoraLink-protected pages

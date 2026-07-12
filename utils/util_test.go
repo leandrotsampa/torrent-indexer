@@ -3,7 +3,7 @@ package utils_test
 import (
 	"testing"
 
-	"github.com/Erickfb/torrent-indexer/utils"
+	"github.com/leandrotsampa/torrent-indexer/utils"
 )
 
 func TestIsValidHTML(t *testing.T) {

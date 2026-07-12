@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Erickfb/torrent-indexer/logging"
-	"github.com/Erickfb/torrent-indexer/schema"
-	"github.com/Erickfb/torrent-indexer/utils"
+	"github.com/leandrotsampa/torrent-indexer/logging"
+	"github.com/leandrotsampa/torrent-indexer/schema"
+	"github.com/leandrotsampa/torrent-indexer/utils"
 	"github.com/hbollon/go-edlib"
 )
 

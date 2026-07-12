@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Erickfb/torrent-indexer/cache"
-	"github.com/Erickfb/torrent-indexer/logging"
+	"github.com/leandrotsampa/torrent-indexer/cache"
+	"github.com/leandrotsampa/torrent-indexer/logging"
 )
 
 type MetadataRequest struct {

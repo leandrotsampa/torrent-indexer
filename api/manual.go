@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Erickfb/torrent-indexer/logging"
-	"github.com/Erickfb/torrent-indexer/magnet"
-	"github.com/Erickfb/torrent-indexer/schema"
-	goscrape "github.com/Erickfb/torrent-indexer/scrape"
+	"github.com/leandrotsampa/torrent-indexer/logging"
+	"github.com/leandrotsampa/torrent-indexer/magnet"
+	"github.com/leandrotsampa/torrent-indexer/schema"
+	goscrape "github.com/leandrotsampa/torrent-indexer/scrape"
 	"github.com/redis/go-redis/v9"
 )
 

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Erickfb/torrent-indexer/cache"
-	"github.com/Erickfb/torrent-indexer/logging"
+	"github.com/leandrotsampa/torrent-indexer/cache"
+	"github.com/leandrotsampa/torrent-indexer/logging"
 )
 
 const (

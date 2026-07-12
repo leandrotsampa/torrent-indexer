@@ -5,13 +5,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Erickfb/torrent-indexer/cache"
-	"github.com/Erickfb/torrent-indexer/consts"
-	"github.com/Erickfb/torrent-indexer/magnet"
-	"github.com/Erickfb/torrent-indexer/monitoring"
-	"github.com/Erickfb/torrent-indexer/requester"
-	"github.com/Erickfb/torrent-indexer/schema"
-	meilisearch "github.com/Erickfb/torrent-indexer/search"
+	"github.com/leandrotsampa/torrent-indexer/cache"
+	"github.com/leandrotsampa/torrent-indexer/consts"
+	"github.com/leandrotsampa/torrent-indexer/magnet"
+	"github.com/leandrotsampa/torrent-indexer/monitoring"
+	"github.com/leandrotsampa/torrent-indexer/requester"
+	"github.com/leandrotsampa/torrent-indexer/schema"
+	meilisearch "github.com/leandrotsampa/torrent-indexer/search"
 )
 
 type Indexer struct {

@@ -128,11 +128,11 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           labels: |
-            org.opencontainers.image.source=https://github.com/Erickfb/torrent-indexer
+            org.opencontainers.image.source=https://github.com/leandrotsampa/torrent-indexer
             org.opencontainers.image.description=Torrent indexer
             org.opencontainers.image.licenses=GPL-3.0
           images: |
-            ghcr.io/erickfb/torrent-indexer
+            ghcr.io/leandrotsampa/torrent-indexer
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}

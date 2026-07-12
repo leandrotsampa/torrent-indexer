@@ -3,7 +3,7 @@ package handler
 import (
 	"testing"
 
-	"github.com/Erickfb/torrent-indexer/schema"
+	"github.com/leandrotsampa/torrent-indexer/schema"
 )
 
 func TestNormalizeBluDVSearchQueryConvertsSeasonEpisode(t *testing.T) {
