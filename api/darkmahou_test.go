@@ -59,12 +59,31 @@ func TestResolveDarkmahouLink(t *testing.T) {
 		{"systemads to magnet", systemAdsHref(darkmahouTestIDMagnet), darkmahouTestMagnet},
 		{"systemads to cloud dropped", systemAdsHref(darkmahouTestIDCloud), ""},
 		{"direct cloud dropped", "https://jottacloud.com/s/abc", ""},
+		{"raw nyaa torrent", "https://nyaa.si/download/1511470.torrent", "https://nyaa.si/download/1511470.torrent"},
 		{"empty", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := resolveDarkmahouLink(tt.href, utils.DarkmahouAdKey); got != tt.want {
 				t.Errorf("resolveDarkmahouLink() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildDarkmahouReleaseTitle(t *testing.T) {
+	tests := []struct {
+		name, page, label, want string
+	}{
+		{"episode with quality", "Gaikotsu Kishi-sama", "Episódio 05 720p", "Gaikotsu Kishi-sama - 05 [720p]"},
+		{"episode only", "Some Anime", "Episódio 12", "Some Anime - 12"},
+		{"batch label", "Some Anime", "1ª Temporada Completo", "Some Anime 1ª Temporada Completo"},
+		{"empty label", "Some Anime", "", "Some Anime"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildDarkmahouReleaseTitle(tt.page, tt.label); got != tt.want {
+				t.Errorf("buildDarkmahouReleaseTitle() = %q, want %q", got, tt.want)
 			}
 		})
 	}

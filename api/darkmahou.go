@@ -153,15 +153,33 @@ func extractDarkmahouKey(doc *goquery.Document) string {
 	return utils.DarkmahouAdKey
 }
 
-// resolveDarkmahouLink turns a download-area anchor into a usable magnet link.
-// It accepts raw magnet links (pre-obfuscation HTML) and ad-gateway links whose
-// "id" holds the AES-GCM-encrypted real URL. Cloud-storage links (jottacloud,
-// drive, etc.) are not usable as torrents and are dropped (returns "").
+// isGrabbableDarkmahouLink reports whether a resolved link is something the
+// *arr apps can grab: a magnet, or a .torrent file URL (darkmahou also serves
+// links to nyaa.si .torrent files). Cloud-storage links (jottacloud, drive,
+// yandex, etc.) are not grabbable and are rejected.
+func isGrabbableDarkmahouLink(u string) bool {
+	if strings.HasPrefix(u, "magnet:") {
+		return true
+	}
+	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+		return false
+	}
+	path := u
+	if idx := strings.IndexAny(path, "?#"); idx >= 0 {
+		path = path[:idx]
+	}
+	return strings.HasSuffix(strings.ToLower(path), ".torrent")
+}
+
+// resolveDarkmahouLink turns a download-area anchor into a grabbable link.
+// It accepts raw magnet/.torrent links (pre-obfuscation HTML) and ad-gateway
+// links whose "id" holds the AES-GCM-encrypted real URL. Cloud-storage links
+// (jottacloud, drive, etc.) are not usable and are dropped (returns "").
 func resolveDarkmahouLink(href, key string) string {
 	if href == "" {
 		return ""
 	}
-	if strings.HasPrefix(href, "magnet:") {
+	if isGrabbableDarkmahouLink(href) {
 		return href
 	}
 	if !darkmahouSystemAdsRE.MatchString(href) {
@@ -183,12 +201,34 @@ func resolveDarkmahouLink(href, key string) string {
 		logging.Warn().Err(err).Str("href", href).Msg("Failed to decode darkmahou ad link")
 		return ""
 	}
-	if strings.HasPrefix(decoded, "magnet:") {
+	if isGrabbableDarkmahouLink(decoded) {
 		return decoded
 	}
 
-	// decoded link is a direct/cloud-storage URL, not a torrent
+	// decoded link is a cloud-storage URL (jottacloud/drive/etc.), not grabbable
 	return ""
+}
+
+var darkmahouEpisodeLabelRE = regexp.MustCompile(`(?i)epis[oó]dio\s*(\d+)`)
+
+// buildDarkmahouReleaseTitle builds a parseable release title for links that
+// are not magnets (e.g. nyaa .torrent files), which carry no display name.
+// It combines the anime page title with the episode number and quality taken
+// from the download label (e.g. "Episódio 01 1080p HEVC").
+func buildDarkmahouReleaseTitle(pageTitle, label string) string {
+	label = strings.TrimSpace(label)
+	if m := darkmahouEpisodeLabelRE.FindStringSubmatch(label); len(m) > 1 {
+		quality := strings.TrimSpace(darkmahouEpisodeLabelRE.ReplaceAllString(label, ""))
+		title := fmt.Sprintf("%s - %s", pageTitle, m[1])
+		if quality != "" {
+			title = fmt.Sprintf("%s [%s]", title, quality)
+		}
+		return title
+	}
+	if label != "" {
+		return strings.TrimSpace(fmt.Sprintf("%s %s", pageTitle, label))
+	}
+	return pageTitle
 }
 
 // extractDarkmahouMagnetLinks walks each download block (div.soraddl), using the
@@ -249,22 +289,30 @@ func getTorrentsDarkmahou(ctx context.Context, i *Indexer, link, referer string)
 	// for each magnet link, create a new indexed torrent
 	for _, magnetLink := range magnetLinks {
 		go func(magnetLink darkmahouMagnetLink) {
-			parsedMagnet, err := magnet.ParseMagnetUri(magnetLink.URL)
-			if err != nil {
-				logging.Error().Err(err).Str("magnet_link", magnetLink.URL).Msg("Failed to parse magnet URI")
-			}
-			releaseTitle := strings.TrimSpace(parsedMagnet.DisplayName)
-			if releaseTitle == "" {
-				releaseTitle = magnetLink.Label
-			}
-			infoHash := parsedMagnet.InfoHash.String()
-			trackers := parsedMagnet.Trackers
-			magnetAudio := getAudioFromTitle(releaseTitle, audio)
+			var releaseTitle, infoHash string
+			var trackers []string
+			var peer, seed int
 
-			peer, seed, err := goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, trackers)
-			if err != nil {
-				logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
+			if strings.HasPrefix(magnetLink.URL, "magnet:") {
+				parsedMagnet, err := magnet.ParseMagnetUri(magnetLink.URL)
+				if err != nil {
+					logging.Error().Err(err).Str("magnet_link", magnetLink.URL).Msg("Failed to parse magnet URI")
+				}
+				releaseTitle = strings.TrimSpace(parsedMagnet.DisplayName)
+				infoHash = parsedMagnet.InfoHash.String()
+				trackers = parsedMagnet.Trackers
+
+				peer, seed, err = goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, trackers)
+				if err != nil {
+					logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
+				}
 			}
+			// .torrent links (e.g. nyaa) carry no display name; build a title
+			// from the page title + episode/quality label so *arr can parse it.
+			if releaseTitle == "" {
+				releaseTitle = buildDarkmahouReleaseTitle(title, magnetLink.Label)
+			}
+			magnetAudio := getAudioFromTitle(releaseTitle, audio)
 
 			originalTitle := processTitle(title, magnetAudio)
 
