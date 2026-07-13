@@ -33,7 +33,38 @@ var (
 	// darkmahouSystemAdsRE matches the ad-gateway anchors that wrap the real link
 	// (e.g. https://systemads1.com/go.php?id=...). The numeric suffix may change.
 	darkmahouSystemAdsRE = regexp.MustCompile(`(?i)^https?://systemads\d*\.[^/]+/go\.php`)
+
+	// darkmahouSeasonEpisodeRE strips season/episode qualifiers from the search
+	// query. darkmahou.io indexes only by anime name; the season and per-episode
+	// downloads live inside the anime page, so searching "<name> 09" or
+	// "<name> temporada 1" returns nothing.
+	darkmahouSeasonEpisodeRE = regexp.MustCompile(`(?i)\s*\b(` +
+		`s\d{1,2}e\d{1,4}|` + // S01E09
+		`\d+\s*ª?\s*temporada|temporada\s*\d+|` + // 1ª temporada / temporada 1
+		`season\s*\d+|s\d{1,2}|` + // season 1 / S01
+		`epis[oó]dio\s*\d{1,4}|episode\s*\d{1,4}|ep\s*\d{1,4}` + // episódio 09
+		`)\b`)
+	// darkmahouTrailingNumberRE strips a trailing bare episode number ("<name> 09").
+	darkmahouTrailingNumberRE = regexp.MustCompile(`\s+\d{1,4}\s*$`)
+	// darkmahouWhitespaceRE collapses whitespace left behind after stripping.
+	darkmahouWhitespaceRE = regexp.MustCompile(`\s+`)
 )
+
+// sanitizeDarkmahouQuery reduces a search query to the bare anime name, dropping
+// season/episode qualifiers that darkmahou.io does not index. If stripping would
+// empty the query, the trimmed original is returned unchanged.
+func sanitizeDarkmahouQuery(q string) string {
+	if q == "" {
+		return q
+	}
+	out := darkmahouSeasonEpisodeRE.ReplaceAllString(q, "")
+	out = darkmahouTrailingNumberRE.ReplaceAllString(out, "")
+	out = strings.TrimSpace(darkmahouWhitespaceRE.ReplaceAllString(out, " "))
+	if out == "" {
+		return strings.TrimSpace(q)
+	}
+	return out
+}
 
 type darkmahouMagnetLink struct {
 	URL   string
@@ -53,7 +84,10 @@ func (i *Indexer) HandlerDarkmahouIndexer(w http.ResponseWriter, r *http.Request
 	// supported query params: q, page, filter_results
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	page := r.URL.Query().Get("page")
-	targetURL := buildDarkmahouURL(metadata, q, page)
+	// darkmahou.io indexes only by anime name; season/episode downloads live
+	// inside the anime page, so the site search must use the bare name. The
+	// original q (with episode) is kept on the request for similarity ranking.
+	targetURL := buildDarkmahouURL(metadata, sanitizeDarkmahouQuery(q), page)
 
 	logging.InfoWithRequest(r).Str("target_url", targetURL).Msg("Processing indexer request")
 	resp, err := i.requester.GetDocument(ctx, targetURL)
@@ -209,14 +243,41 @@ func resolveDarkmahouLink(href, key string) string {
 	return ""
 }
 
-var darkmahouEpisodeLabelRE = regexp.MustCompile(`(?i)epis[oó]dio\s*(\d+)`)
+var (
+	darkmahouEpisodeLabelRE = regexp.MustCompile(`(?i)epis[oó]dio\s*(\d+)`)
+	// darkmahouLabelNoiseRE drops filler words darkmahou puts in download
+	// headings that are not release info ("Torrent", "Download", "Baixar", ...).
+	darkmahouLabelNoiseRE = regexp.MustCompile(`(?i)\b(torrent|download|baixar|assistir|online)\b`)
+	// darkmahouResolutionRE detects a resolution token (480p/720p/1080p/2160p/4K),
+	// used to tell a complete magnet display name from a generic series-only one.
+	darkmahouResolutionRE = regexp.MustCompile(`(?i)(\b\d{3,4}p\b|\b4k\b)`)
+)
 
-// buildDarkmahouReleaseTitle builds a parseable release title for links that
-// are not magnets (e.g. nyaa .torrent files), which carry no display name.
-// It combines the anime page title with the episode number and quality taken
-// from the download label (e.g. "Episódio 01 1080p HEVC").
+// chooseDarkmahouReleaseTitle picks the best release title for a download.
+// darkmahou magnet display names are inconsistent: some are complete release
+// names carrying group/episode-range/quality (e.g.
+// "[Erai-raws] Anime - 01 ~ 12 [1080p]"), others are just the series title with
+// no quality. When the display name already has a resolution it is kept as-is;
+// otherwise the title is rebuilt from the page title + block label, which holds
+// the quality and episode/season info that *arr needs (per-episode, season
+// packs and each quality).
+func chooseDarkmahouReleaseTitle(displayName, pageTitle, label string) string {
+	displayName = strings.TrimSpace(displayName)
+	if displayName != "" && darkmahouResolutionRE.MatchString(displayName) {
+		return displayName
+	}
+	return buildDarkmahouReleaseTitle(pageTitle, label)
+}
+
+// buildDarkmahouReleaseTitle builds a parseable release title from the anime
+// page title plus the download-block label. The label is darkmahou's own
+// organization of the download and carries the episode/season and quality
+// (e.g. "Episódio 01 1080p HEVC" or "1ª Temporada Completa Torrent [01-12] 1080p")
+// that magnet display names omit, so it is the authoritative source for *arr
+// parsing (per-episode releases, season packs and each quality).
 func buildDarkmahouReleaseTitle(pageTitle, label string) string {
-	label = strings.TrimSpace(label)
+	label = strings.TrimSpace(darkmahouWhitespaceRE.ReplaceAllString(
+		darkmahouLabelNoiseRE.ReplaceAllString(label, ""), " "))
 	if m := darkmahouEpisodeLabelRE.FindStringSubmatch(label); len(m) > 1 {
 		quality := strings.TrimSpace(darkmahouEpisodeLabelRE.ReplaceAllString(label, ""))
 		title := fmt.Sprintf("%s - %s", pageTitle, m[1])
@@ -289,7 +350,7 @@ func getTorrentsDarkmahou(ctx context.Context, i *Indexer, link, referer string)
 	// for each magnet link, create a new indexed torrent
 	for _, magnetLink := range magnetLinks {
 		go func(magnetLink darkmahouMagnetLink) {
-			var releaseTitle, infoHash string
+			var displayName, infoHash string
 			var trackers []string
 			var peer, seed int
 
@@ -298,7 +359,7 @@ func getTorrentsDarkmahou(ctx context.Context, i *Indexer, link, referer string)
 				if err != nil {
 					logging.Error().Err(err).Str("magnet_link", magnetLink.URL).Msg("Failed to parse magnet URI")
 				}
-				releaseTitle = strings.TrimSpace(parsedMagnet.DisplayName)
+				displayName = strings.TrimSpace(parsedMagnet.DisplayName)
 				infoHash = parsedMagnet.InfoHash.String()
 				trackers = parsedMagnet.Trackers
 
@@ -307,11 +368,11 @@ func getTorrentsDarkmahou(ctx context.Context, i *Indexer, link, referer string)
 					logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
 				}
 			}
-			// .torrent links (e.g. nyaa) carry no display name; build a title
-			// from the page title + episode/quality label so *arr can parse it.
-			if releaseTitle == "" {
-				releaseTitle = buildDarkmahouReleaseTitle(title, magnetLink.Label)
-			}
+			// Keep a complete magnet display name (group/range/quality) as-is;
+			// otherwise rebuild from the page title + block label so episodes,
+			// season packs and each quality are distinguishable. .torrent links
+			// (e.g. nyaa) carry no display name and always use the label.
+			releaseTitle := chooseDarkmahouReleaseTitle(displayName, title, magnetLink.Label)
 			magnetAudio := getAudioFromTitle(releaseTitle, audio)
 
 			originalTitle := processTitle(title, magnetAudio)

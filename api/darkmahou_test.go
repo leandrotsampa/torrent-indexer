@@ -71,6 +71,67 @@ func TestResolveDarkmahouLink(t *testing.T) {
 	}
 }
 
+func TestSanitizeDarkmahouQuery(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{"bare name unchanged", "The All devouring Whale", "The All devouring Whale"},
+		{"trailing episode", "The All devouring Whale 09", "The All devouring Whale"},
+		{"colon name with episode", "The All-devouring Whale: Homecoming 09", "The All-devouring Whale: Homecoming"},
+		{"temporada suffix", "the all devouring whale temporada 1", "the all devouring whale"},
+		{"ordinal temporada", "some anime 2ª temporada", "some anime"},
+		{"season suffix", "some anime season 3", "some anime"},
+		{"s01e09 format", "some anime S01E09", "some anime"},
+		{"season token", "some anime S02", "some anime"},
+		{"episodio pt", "some anime episódio 12", "some anime"},
+		{"episode en", "some anime episode 4", "some anime"},
+		{"empty stays empty", "", ""},
+		{"numeric-only title kept", "86", "86"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeDarkmahouQuery(tt.in); got != tt.want {
+				t.Errorf("sanitizeDarkmahouQuery(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChooseDarkmahouReleaseTitle(t *testing.T) {
+	tests := []struct {
+		name, displayName, pageTitle, label, want string
+	}{
+		{
+			"rich display name kept",
+			"[Erai-raws] Karakai Jouzu no Takagi-san - 01 ~ 12 [1080p][Multiple Subtitle]",
+			"Karakai Jouzu no Takagi-san",
+			"1ª Temporada Completo Legendado Torrent 1080p",
+			"[Erai-raws] Karakai Jouzu no Takagi-san - 01 ~ 12 [1080p][Multiple Subtitle]",
+		},
+		{
+			"generic display name rebuilt from label",
+			"The All-devouring Whale Homecoming",
+			"The All-devouring Whale: Homecoming",
+			"1ª Temporada Completa Dublado Torrent [01-12] 1080p",
+			"The All-devouring Whale: Homecoming 1ª Temporada Completa Dublado [01-12] 1080p",
+		},
+		{
+			"empty display name (nyaa torrent) uses label",
+			"",
+			"Some Anime",
+			"Episódio 07 720p",
+			"Some Anime - 07 [720p]",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := chooseDarkmahouReleaseTitle(tt.displayName, tt.pageTitle, tt.label); got != tt.want {
+				t.Errorf("chooseDarkmahouReleaseTitle() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildDarkmahouReleaseTitle(t *testing.T) {
 	tests := []struct {
 		name, page, label, want string
@@ -78,6 +139,8 @@ func TestBuildDarkmahouReleaseTitle(t *testing.T) {
 		{"episode with quality", "Gaikotsu Kishi-sama", "Episódio 05 720p", "Gaikotsu Kishi-sama - 05 [720p]"},
 		{"episode only", "Some Anime", "Episódio 12", "Some Anime - 12"},
 		{"batch label", "Some Anime", "1ª Temporada Completo", "Some Anime 1ª Temporada Completo"},
+		{"season pack with quality strips noise", "The All-devouring Whale: Homecoming", "1ª Temporada Completa Dublado Torrent [01-12] 1080p", "The All-devouring Whale: Homecoming 1ª Temporada Completa Dublado [01-12] 1080p"},
+		{"episode strips noise word", "Some Anime", "Episódio 03 Torrent 720p", "Some Anime - 03 [720p]"},
 		{"empty label", "Some Anime", "", "Some Anime"},
 	}
 	for _, tt := range tests {
