@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -251,6 +252,12 @@ var (
 	// darkmahouResolutionRE detects a resolution token (480p/720p/1080p/2160p/4K),
 	// used to tell a complete magnet display name from a generic series-only one.
 	darkmahouResolutionRE = regexp.MustCompile(`(?i)(\b\d{3,4}p\b|\b4k\b)`)
+	// darkmahouSeasonLabelRE matches a Portuguese season heading ("1ª Temporada",
+	// "2 Temporada Completa"), capturing the season number and whether it is a
+	// complete-season pack.
+	darkmahouSeasonLabelRE = regexp.MustCompile(`(?i)(\d+)\s*ª?\s*temporada(\s+(completa|completo))?`)
+	// darkmahouRangeRE matches a bracketed episode range ("[01-12]", "(01~12)").
+	darkmahouRangeRE = regexp.MustCompile(`[\[\(]\s*\d{1,4}\s*[-~]\s*\d{1,4}\s*[\]\)]`)
 )
 
 // chooseDarkmahouReleaseTitle picks the best release title for a download.
@@ -278,6 +285,9 @@ func chooseDarkmahouReleaseTitle(displayName, pageTitle, label string) string {
 func buildDarkmahouReleaseTitle(pageTitle, label string) string {
 	label = strings.TrimSpace(darkmahouWhitespaceRE.ReplaceAllString(
 		darkmahouLabelNoiseRE.ReplaceAllString(label, ""), " "))
+
+	// Per-episode: "Episódio 05 720p" -> "<page> - 05 [720p]". Anime episodes use
+	// absolute numbering, which *arr parses well.
 	if m := darkmahouEpisodeLabelRE.FindStringSubmatch(label); len(m) > 1 {
 		quality := strings.TrimSpace(darkmahouEpisodeLabelRE.ReplaceAllString(label, ""))
 		title := fmt.Sprintf("%s - %s", pageTitle, m[1])
@@ -286,6 +296,21 @@ func buildDarkmahouReleaseTitle(pageTitle, label string) string {
 		}
 		return title
 	}
+
+	// Season pack: normalize "1ª Temporada Completa" -> "S01". Sonarr reads "S01"
+	// as a full-season pack (Season 1 -> 1x1-N); a bare "[01-12]" is read as
+	// absolute episode numbers and fails to match the series, so for a complete
+	// season the now-redundant range is dropped.
+	if m := darkmahouSeasonLabelRE.FindStringSubmatch(label); len(m) > 1 {
+		season, _ := strconv.Atoi(m[1])
+		complete := m[3] != ""
+		label = darkmahouSeasonLabelRE.ReplaceAllString(label, fmt.Sprintf("S%02d", season))
+		if complete {
+			label = darkmahouRangeRE.ReplaceAllString(label, "")
+		}
+		label = strings.TrimSpace(darkmahouWhitespaceRE.ReplaceAllString(label, " "))
+	}
+
 	if label != "" {
 		return strings.TrimSpace(fmt.Sprintf("%s %s", pageTitle, label))
 	}

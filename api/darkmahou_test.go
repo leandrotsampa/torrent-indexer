@@ -113,7 +113,7 @@ func TestChooseDarkmahouReleaseTitle(t *testing.T) {
 			"The All-devouring Whale Homecoming",
 			"The All-devouring Whale: Homecoming",
 			"1ª Temporada Completa Dublado Torrent [01-12] 1080p",
-			"The All-devouring Whale: Homecoming 1ª Temporada Completa Dublado [01-12] 1080p",
+			"The All-devouring Whale: Homecoming S01 Dublado 1080p",
 		},
 		{
 			"empty display name (nyaa torrent) uses label",
@@ -138,8 +138,10 @@ func TestBuildDarkmahouReleaseTitle(t *testing.T) {
 	}{
 		{"episode with quality", "Gaikotsu Kishi-sama", "Episódio 05 720p", "Gaikotsu Kishi-sama - 05 [720p]"},
 		{"episode only", "Some Anime", "Episódio 12", "Some Anime - 12"},
-		{"batch label", "Some Anime", "1ª Temporada Completo", "Some Anime 1ª Temporada Completo"},
-		{"season pack with quality strips noise", "The All-devouring Whale: Homecoming", "1ª Temporada Completa Dublado Torrent [01-12] 1080p", "The All-devouring Whale: Homecoming 1ª Temporada Completa Dublado [01-12] 1080p"},
+		{"season pack normalized to SNN", "Some Anime", "1ª Temporada Completo", "Some Anime S01"},
+		{"season pack drops range and noise", "The All-devouring Whale: Homecoming", "1ª Temporada Completa Dublado Torrent [01-12] 1080p", "The All-devouring Whale: Homecoming S01 Dublado 1080p"},
+		{"season pack legendado with paren range", "Gaikotsu", "1ª Temporada Completo Legendado Torrent (01-12) 1080p", "Gaikotsu S01 Legendado 1080p"},
+		{"second season", "Some Anime", "2ª Temporada Completa 1080p", "Some Anime S02 1080p"},
 		{"episode strips noise word", "Some Anime", "Episódio 03 Torrent 720p", "Some Anime - 03 [720p]"},
 		{"empty label", "Some Anime", "", "Some Anime"},
 	}
