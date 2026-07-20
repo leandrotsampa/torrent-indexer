@@ -77,9 +77,11 @@ func TestFilterBluDVSeasonResultsKeepsRequestedSeason(t *testing.T) {
 	}
 }
 
-func TestFilterBluDVSeasonResultsRejectsSpinOffTitle(t *testing.T) {
+func TestFilterBluDVSeasonResultsRejectsAppendedTitleWithoutSeparator(t *testing.T) {
+	// Extra words appended without a subtitle separator indicate a different
+	// title and must be rejected (only the exact show is kept).
 	torrents := []schema.IndexedTorrent{
-		{OriginalTitle: "Rick e Morty: O Anime 1a Temporada Torrent"},
+		{OriginalTitle: "Rick and Morty Multiverso 1a Temporada Torrent"},
 		{OriginalTitle: "Rick and Morty 1a Temporada Torrent"},
 	}
 
@@ -89,6 +91,24 @@ func TestFilterBluDVSeasonResultsRejectsSpinOffTitle(t *testing.T) {
 		t.Fatalf("got %d torrents, want 1", len(got))
 	}
 	if got[0].OriginalTitle != "Rick and Morty 1a Temporada Torrent" {
+		t.Fatalf("result = %q", got[0].OriginalTitle)
+	}
+}
+
+func TestFilterBluDVSeasonResultsKeepsLocalizedSubtitle(t *testing.T) {
+	// The show name is followed by a localized subtitle after a separator, as
+	// bludv titles this spin-off ("Georgie e Mandy: Seu Primeiro Casamento").
+	torrents := []schema.IndexedTorrent{
+		{OriginalTitle: "Georgie e Mandy: Seu Primeiro Casamento 2a Temporada (2025)"},
+		{OriginalTitle: "Georgie e Mandy Seu Primeiro Casamento 1a Temporada (2024)"},
+	}
+
+	got := filterBluDVSeasonResults("georgie e mandy temporada 2", torrents)
+
+	if len(got) != 1 {
+		t.Fatalf("got %d torrents, want 1", len(got))
+	}
+	if got[0].OriginalTitle != "Georgie e Mandy: Seu Primeiro Casamento 2a Temporada (2025)" {
 		t.Fatalf("result = %q", got[0].OriginalTitle)
 	}
 }
@@ -117,7 +137,7 @@ func TestBuildBluDVURLUsesSearchPagination(t *testing.T) {
 
 func TestFilterBluDVSearchLinksKeepsRequestedTitleAndSeason(t *testing.T) {
 	links := []bludvSearchLink{
-		{URL: "https://bludv2.xyz/rick-e-morty-o-anime-1a-temporada/", Title: "Rick e Morty: O Anime 1a Temporada"},
+		{URL: "https://bludv2.xyz/rick-and-morty-multiverso-1a-temporada/", Title: "Rick and Morty Multiverso 1a Temporada"},
 		{URL: "https://bludv2.xyz/rick-and-morty-7a-temporada/", Title: "Rick and Morty 7a Temporada"},
 		{URL: "https://bludv2.xyz/rick-and-morty-1a-temporada/", Title: "Rick and Morty 1a Temporada"},
 	}
@@ -146,9 +166,20 @@ func TestMatchesBluDVRequestedTitleTreatsEAndAndAsEquivalent(t *testing.T) {
 	}
 }
 
-func TestMatchesBluDVRequestedTitleRejectsExtraSubtitle(t *testing.T) {
-	if matchesBluDVRequestedTitle("rick e morty s01e01", "Rick e Morty: O Anime 1a Temporada") {
-		t.Fatal("expected spin-off title not to match")
+func TestMatchesBluDVRequestedTitleRejectsAppendedWithoutSeparator(t *testing.T) {
+	// Extra words with no subtitle separator mean a different title.
+	if matchesBluDVRequestedTitle("rick e morty s01e01", "Rick e Morty Multiverso 1a Temporada") {
+		t.Fatal("expected appended title not to match")
+	}
+}
+
+func TestMatchesBluDVRequestedTitleAcceptsLocalizedSubtitle(t *testing.T) {
+	// A localized subtitle after a separator is tolerated, so bludv posts like
+	// "Georgie e Mandy: Seu Primeiro Casamento" match the short query. Spin-offs
+	// that share the base name (e.g. "Rick e Morty: O Anime") are also accepted
+	// here on purpose; Sonarr/Prowlarr do the final title/episode matching.
+	if !matchesBluDVRequestedTitle("georgie e mandy temporada 2", "Georgie e Mandy: Seu Primeiro Casamento 2a Temporada") {
+		t.Fatal("expected localized subtitle title to match")
 	}
 }
 

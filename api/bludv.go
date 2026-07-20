@@ -54,6 +54,7 @@ var (
 	bludvNonWordRE             = regexp.MustCompile(`[^a-z0-9]+`)
 	bludvSystemAdsAnchorRE     = regexp.MustCompile(`(?is)<a\s+[^>]*href=["']([^"']*systemads\d*\.[a-z]+/go\.php[^"']*)["'][^>]*>(.*?)</a>`)
 	bludvHTMLTagRE             = regexp.MustCompile(`(?is)<[^>]+>`)
+	bludvSubtitleSeparatorRE   = regexp.MustCompile(`[:|–]|\s-\s`)
 )
 
 var bludvComparableTextReplacer = strings.NewReplacer(
@@ -351,13 +352,40 @@ func matchesBluDVRequestedTitle(q, title string) bool {
 		return true
 	}
 
-	titleTokens := bludvReleaseTitleTokens(title)
-	if len(titleTokens) != len(requestedTokens) {
+	// Exact token match (e.g. "rick e morty" == "Rick e Morty ... Temporada").
+	if bludvTokensEqual(bludvReleaseTitleTokens(title), requestedTokens) {
+		return true
+	}
+
+	// Tolerate a localized/expanded subtitle introduced by a separator
+	// (":", "|", "–", " - "), e.g. matching the query "georgie e mandy" against
+	// the post "Georgie e Mandy: Seu Primeiro Casamento". The part before the
+	// first separator must match the query exactly; extra words appended without
+	// a separator still indicate a different title and are rejected.
+	if mainTitle := bludvTitleBeforeSubtitleSeparator(title); mainTitle != "" {
+		if bludvTokensEqual(bludvReleaseTitleTokens(mainTitle), requestedTokens) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func bludvTitleBeforeSubtitleSeparator(title string) string {
+	if loc := bludvSubtitleSeparatorRE.FindStringIndex(title); loc != nil {
+		return strings.TrimSpace(title[:loc[0]])
+	}
+
+	return ""
+}
+
+func bludvTokensEqual(a, b []string) bool {
+	if len(a) != len(b) {
 		return false
 	}
 
-	for idx := range requestedTokens {
-		if titleTokens[idx] != requestedTokens[idx] {
+	for idx := range a {
+		if a[idx] != b[idx] {
 			return false
 		}
 	}
