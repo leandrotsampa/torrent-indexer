@@ -136,6 +136,36 @@ func getSeparator(s string) string {
 	return " "
 }
 
+// dualAudioTokens mark "dual audio" content, which on these Brazilian sites
+// always includes Portuguese plus another language. The other language, when
+// named, is captured separately; here we ensure Portuguese is detected.
+var dualAudioTokens = map[string]struct{}{
+	"dual":       {},
+	"dual audio": {},
+	"dual áudio": {},
+}
+
+// noiseTokens are leftovers of splitting the "Áudio"/"Idioma" field that carry
+// no language information, so they should neither map to a language nor warn.
+var noiseTokens = map[string]struct{}{
+	"audio": {},
+	"áudio": {},
+	"–":     {},
+	"-":     {},
+}
+
+// isDualAudioToken reports whether the token marks dual-audio (implies Portuguese).
+func isDualAudioToken(lang string) bool {
+	_, ok := dualAudioTokens[strings.ToLower(lang)]
+	return ok
+}
+
+// isNoiseToken reports whether the token is a known non-language artifact.
+func isNoiseToken(lang string) bool {
+	_, ok := noiseTokens[strings.ToLower(lang)]
+	return ok
+}
+
 // findAudioFromText extracts audio languages from a given text.
 // It looks for patterns like "Áudio: Português, Inglês" or "Idioma: Português, Inglês"
 func findAudioFromText(text string) []schema.Audio {
@@ -150,7 +180,11 @@ func findAudioFromText(text string) []schema.Audio {
 			a := schema.GetAudioFromString(lang)
 			if a != nil {
 				audio = append(audio, *a)
-			} else if strings.TrimSpace(lang) != "" {
+			} else if isDualAudioToken(lang) {
+				// "Dual Áudio" implies Portuguese; the other language, if named,
+				// is captured from its own token.
+				audio = append(audio, schema.AudioPortuguese)
+			} else if lang != "" && !isNoiseToken(lang) {
 				logging.Warn().
 					Str("language", lang).
 					Msg("Unknown language detected")

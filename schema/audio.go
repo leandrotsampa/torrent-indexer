@@ -68,6 +68,11 @@ const (
 	AudioTelugu      = "Telugu"
 	AudioGujarati    = "Gujarati"
 	AudioMarathi     = "Marathi"
+	AudioSlovak      = "Eslovaco"
+	AudioSlovak2     = "Eslovaca"
+	AudioSlovenian   = "Esloveno"
+	AudioSlovenian2  = "Eslovena"
+	AudioSlovenian3  = "SL"
 )
 
 var AudioList = []Audio{
@@ -134,6 +139,11 @@ var AudioList = []Audio{
 	AudioTelugu,
 	AudioGujarati,
 	AudioMarathi,
+	AudioSlovak,
+	AudioSlovak2,
+	AudioSlovenian,
+	AudioSlovenian2,
+	AudioSlovenian3,
 }
 
 func (a Audio) String() string {
@@ -277,6 +287,16 @@ func (a Audio) toTag() string {
 		return "guj"
 	case AudioMarathi:
 		return "mar"
+	case AudioSlovak:
+		return "slk"
+	case AudioSlovak2:
+		return "slk"
+	case AudioSlovenian:
+		return "slv"
+	case AudioSlovenian2:
+		return "slv"
+	case AudioSlovenian3:
+		return "slv"
 	default:
 		return ""
 	}
