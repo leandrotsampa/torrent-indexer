@@ -63,7 +63,12 @@ func parseInfohash(xt string) (ih T, err error) {
 		case 40:
 			return hex.Decode
 		case 32:
-			return base32.StdEncoding.Decode
+			// Some sites emit the infohash as lowercase base32, which the
+			// standard encoding (alphabet A-Z2-7) rejects. Uppercase before
+			// decoding so both cases are accepted.
+			return func(dst, src []byte) (int, error) {
+				return base32.StdEncoding.Decode(dst, []byte(strings.ToUpper(string(src))))
+			}
 		}
 		return nil
 	}()
@@ -77,7 +82,8 @@ func parseInfohash(xt string) (ih T, err error) {
 		return
 	}
 	if n != 20 {
-		panic(n)
+		err = fmt.Errorf("decoded infohash has unexpected length: %d", n)
+		return
 	}
 	return
 }
