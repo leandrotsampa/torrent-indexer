@@ -19,9 +19,9 @@ services:
       # - MEILISEARCH_KEY=my-secret-key
 
       ## Magnet Metadata API configuration (optional)
-      # - MAGNET_METADATA_API_ENABLED=false
-      # - MAGNET_METADATA_API_ADDRESS=http://magnet-metadata-api:8080
-      # - MAGNET_METADATA_API_TIMEOUT_SECONDS=10
+      # - MAGNET_METADATA_ENABLED=true
+      # - MAGNET_METADATA_PEER_TIMEOUT_SECONDS=5
+      # - MAGNET_METADATA_MAX_PEERS=30
   
   redis:
     image: redis:alpine

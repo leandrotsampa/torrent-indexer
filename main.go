@@ -14,6 +14,7 @@ import (
 	"github.com/leandrotsampa/torrent-indexer/public"
 	"github.com/leandrotsampa/torrent-indexer/requester"
 	meilisearch "github.com/leandrotsampa/torrent-indexer/search"
+	"github.com/leandrotsampa/torrent-indexer/utils"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	str2duration "github.com/xhit/go-str2duration/v2"
@@ -25,16 +26,22 @@ func main() {
 
 	redis := cache.NewRedis()
 	searchIndex := meilisearch.NewSearchIndexer(os.Getenv("MEILISEARCH_ADDRESS"), os.Getenv("MEILISEARCH_KEY"), "torrents")
-	var magnetMetadataAPI *magnet.MetadataClient
-	if os.Getenv("MAGNET_METADATA_API_ENABLED") == "true" {
-		timeout := 10 * time.Second
-		if v := os.Getenv("MAGNET_METADATA_API_TIMEOUT_SECONDS"); v != "" {
-			if t, err := strconv.Atoi(v); err == nil {
-				timeout = time.Duration(t) * time.Second
-			}
-		}
-		magnetMetadataAPI = magnet.NewClient(os.Getenv("MAGNET_METADATA_API_ADDRESS"), timeout, redis)
+	// Torrent metadata (size, real name, file list) is resolved straight from the
+	// swarm — no external service. Disable with MAGNET_METADATA_ENABLED=false.
+	metadataConfig := magnet.ResolverConfig{
+		Enabled: utils.GetEnvOrDefault("MAGNET_METADATA_ENABLED", "true") == "true",
 	}
+	if v := os.Getenv("MAGNET_METADATA_PEER_TIMEOUT_SECONDS"); v != "" {
+		if t, err := strconv.Atoi(v); err == nil {
+			metadataConfig.PeerTimeout = time.Duration(t) * time.Second
+		}
+	}
+	if v := os.Getenv("MAGNET_METADATA_MAX_PEERS"); v != "" {
+		if t, err := strconv.Atoi(v); err == nil {
+			metadataConfig.MaxPeers = t
+		}
+	}
+	magnetMetadata := magnet.NewResolver(metadataConfig, redis)
 	metrics := monitoring.NewMetrics()
 	metrics.Register()
 
@@ -80,7 +87,7 @@ func main() {
 		FallbackTitleEnabled: os.Getenv("FALLBACK_TITLE_ENABLED") == "true",
 	}
 
-	indexers := handler.NewIndexers(icfg, redis, metrics, req, searchIndex, magnetMetadataAPI)
+	indexers := handler.NewIndexers(icfg, redis, metrics, req, searchIndex, magnetMetadata)
 	search := handler.NewMeilisearchHandler(searchIndex)
 
 	indexerMux := http.NewServeMux()

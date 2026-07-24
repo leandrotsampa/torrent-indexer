@@ -33,4 +33,5 @@ require (
 	github.com/prometheus/client_golang v1.22.0
 	github.com/rs/zerolog v1.33.0
 	github.com/xhit/go-str2duration/v2 v2.1.0
+	github.com/zeebo/bencode v1.0.0
 )

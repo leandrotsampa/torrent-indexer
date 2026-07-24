@@ -20,7 +20,7 @@ type Indexer struct {
 	metrics           *monitoring.Metrics
 	requester         *requester.Requster
 	search            *meilisearch.SearchIndexer
-	magnetMetadataAPI *magnet.MetadataClient
+	magnetMetadataAPI *magnet.Resolver
 	postProcessors    []PostProcessorFunc
 }
 
@@ -61,7 +61,7 @@ func NewIndexers(
 	metrics *monitoring.Metrics,
 	req *requester.Requster,
 	si *meilisearch.SearchIndexer,
-	mc *magnet.MetadataClient,
+	mc *magnet.Resolver,
 ) *Indexer {
 	return &Indexer{
 		config:            config,

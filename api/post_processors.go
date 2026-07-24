@@ -98,11 +98,6 @@ func FullfilMissingMetadata(i *Indexer, r *http.Request, torrents []schema.Index
 			}
 		}
 
-		// If "date" is zero, use the date from metadata if available
-		if it.Date.IsZero() {
-			it.Date = m.CreatedAt
-		}
-
 		return []schema.IndexedTorrent{it}, nil
 	})
 }

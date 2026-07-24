@@ -59,10 +59,10 @@ You can configure the server using the following environment variables:
 ### Extra Configuration
 - `FALLBACK_TITLE_ENABLED`: (optional) Mark title fallbacks as unsafe by prefixing `"[UNSAFE] "` when the magnet does not provide a display name and the page title is used instead. Default: `false`
     - The API always returns a non-empty `title` when `original_title` is available because Prowlarr/Sonarr require release titles.
-- `MAGNET_METADATA_API_ENABLED`: (optional) Enable the magnet metadata API. (deploy instrucitons [here](https://github.com/felipemarinho97/magnet-metadata-api)) Default: `false`
-- `MAGNET_METADATA_API_ADDRESS`: (optional) The address of your magnet metadata API. Default: `N/A`
-- `MAGNET_METADATA_API_TIMEOUT_SECONDS`: (optional) The timeout for the magnet metadata API requests in seconds. Default: `10`
-- `MAGNET_METADATA_API_INLINE_TIMEOUT_SECONDS`: (optional) How long a search waits for the metadata lookup (size/name) before answering without it. Slower lookups keep running in the background, so the next search is served from cache. Default: `3`
+- `MAGNET_METADATA_ENABLED`: (optional) Resolve missing torrent metadata (size, real name and file list) directly from the swarm: peers come from the trackers via announce (BEP-0015) and the info dict from `ut_metadata` (BEP-0009). No external service is involved. Default: `true`
+- `MAGNET_METADATA_PEER_TIMEOUT_SECONDS`: (optional) Timeout for the exchange with a single peer. Default: `5`
+- `MAGNET_METADATA_MAX_PEERS`: (optional) How many peers to collect from the trackers per lookup. Default: `30`
+- `MAGNET_METADATA_API_INLINE_TIMEOUT_SECONDS`: (optional) How long a search waits for the metadata lookup before answering without it. Slower lookups keep resolving in the background, so the next search is served from cache. Default: `3`
 - `INDEXER_<NAME>_URL`: (optional) Set a custom URL for the indexer. Where the "NAME" will be always uppercase indexer key with underscores. ex: `INDEXER_DODO_FILMES_URL=https://my-proxied-dodo-url.org`
     - `comando_torrents` supports both `INDEXER_COMANDO_TORRENTS_URL` and the legacy `INDEXER_COMANDO_URL`.
     - `erai_raws` defaults to `https://www.erai-raws.info/` and supports `INDEXER_ERAI_RAWS_URL`.
