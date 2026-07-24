@@ -450,3 +450,29 @@ func Test_findYearFromText(t *testing.T) {
 		})
 	}
 }
+
+func TestMagnetMetadataInlineTimeoutDefaultsWhenUnset(t *testing.T) {
+	t.Setenv("MAGNET_METADATA_API_INLINE_TIMEOUT_SECONDS", "")
+
+	if got := magnetMetadataInlineTimeout(); got != magnetMetadataInlineTimeoutDefault {
+		t.Fatalf("magnetMetadataInlineTimeout() = %v, want %v", got, magnetMetadataInlineTimeoutDefault)
+	}
+}
+
+func TestMagnetMetadataInlineTimeoutUsesEnv(t *testing.T) {
+	t.Setenv("MAGNET_METADATA_API_INLINE_TIMEOUT_SECONDS", "5")
+
+	if got := magnetMetadataInlineTimeout(); got != 5*time.Second {
+		t.Fatalf("magnetMetadataInlineTimeout() = %v, want 5s", got)
+	}
+}
+
+func TestMagnetMetadataInlineTimeoutIgnoresInvalidEnv(t *testing.T) {
+	for _, value := range []string{"abc", "0", "-1"} {
+		t.Setenv("MAGNET_METADATA_API_INLINE_TIMEOUT_SECONDS", value)
+
+		if got := magnetMetadataInlineTimeout(); got != magnetMetadataInlineTimeoutDefault {
+			t.Fatalf("magnetMetadataInlineTimeout() with %q = %v, want %v", value, got, magnetMetadataInlineTimeoutDefault)
+		}
+	}
+}

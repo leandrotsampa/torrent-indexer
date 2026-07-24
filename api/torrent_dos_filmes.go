@@ -203,9 +203,7 @@ func getTorrentsTorrentDosFilmes(ctx context.Context, i *Indexer, link, referer 
 				mySize = size[it]
 			}
 			if mySize == "" {
-				go func() {
-					_, _ = i.magnetMetadataAPI.FetchMetadata(ctx, magnetLink)
-				}()
+				warmMagnetMetadata(ctx, i, magnetLink)
 			}
 
 			ixt := schema.IndexedTorrent{

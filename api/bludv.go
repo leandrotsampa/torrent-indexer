@@ -969,9 +969,7 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 				mySize = size[0]
 			}
 			if mySize == "" {
-				go func() {
-					_, _ = i.magnetMetadataAPI.FetchMetadata(ctx, magnetLink.URL)
-				}()
+				warmMagnetMetadata(ctx, i, magnetLink.URL)
 			}
 
 			title := processTitle(title, magnetAudio)

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"slices"
@@ -63,8 +64,17 @@ func FullfilMissingMetadata(i *Indexer, r *http.Request, torrents []schema.Index
 		if it.Size != "" && it.Title != "" && it.OriginalTitle != "" {
 			return []schema.IndexedTorrent{it}, nil
 		}
-		m, err := i.magnetMetadataAPI.FetchMetadata(r.Context(), it.MagnetLink)
+
+		// Bound the wait: a cached lookup answers instantly, while a cold one goes
+		// through the DHT and must not hold the search back.
+		ctx, cancel := context.WithTimeout(r.Context(), magnetMetadataInlineTimeout())
+		defer cancel()
+
+		m, err := i.magnetMetadataAPI.FetchMetadata(ctx, it.MagnetLink)
 		if err != nil {
+			// Finish the lookup in the background so the next search is served
+			// from cache instead of paying for it again.
+			warmMagnetMetadata(r.Context(), i, it.MagnetLink)
 			return []schema.IndexedTorrent{it}, nil
 		}
 
