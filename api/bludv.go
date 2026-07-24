@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +30,10 @@ var bludv = IndexerMeta{
 }
 
 const bludvMaxSeasonSearchPages = 3
+
+// bludvMaxLocalizedTitleChecks bounds how many posts are opened just to read
+// their original title, as each check costs one request to the post page.
+const bludvMaxLocalizedTitleChecks = 5
 
 var bludvTransmissionTrackers = []string{
 	"udp://tracker.openbittorrent.com:80/announce",
@@ -55,6 +60,9 @@ var (
 	bludvSystemAdsAnchorRE     = regexp.MustCompile(`(?is)<a\s+[^>]*href=["']([^"']*systemads\d*\.[a-z]+/go\.php[^"']*)["'][^>]*>(.*?)</a>`)
 	bludvHTMLTagRE             = regexp.MustCompile(`(?is)<[^>]+>`)
 	bludvSubtitleSeparatorRE   = regexp.MustCompile(`[:|–]|\s-\s`)
+	bludvLineBreakTagRE        = regexp.MustCompile(`(?is)<br\s*/?>|</(?:p|div|li|tr|h[1-6])>`)
+	bludvOriginalTitleRE       = regexp.MustCompile(`(?i)t.tulos?\s+origina(?:l|is)\s*:\s*([^\n\r|]+)`)
+	bludvPostTitleFieldRE      = regexp.MustCompile(`(?i)\b(?:t.tulos?|nomes?)[^\n\r:]{0,20}:\s*([^\n\r|]+)`)
 )
 
 var bludvComparableTextReplacer = strings.NewReplacer(
@@ -164,10 +172,12 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	links := extractBluDVSearchLinks(doc)
+	var titleConfirmedDetails map[string]bool
 	if requestedSeason != "" && q != "" {
-		links = filterBluDVSearchLinks(rawQ, requestedSeason, links)
+		matched, pending := filterBluDVSearchLinks(rawQ, requestedSeason, links)
+		pendingLinks := pending
 
-		for pageNum := 2; len(links) == 0 && page == "" && pageNum <= bludvMaxSeasonSearchPages; pageNum++ {
+		for pageNum := 2; len(matched) == 0 && page == "" && pageNum <= bludvMaxSeasonSearchPages; pageNum++ {
 			nextURL := buildBluDVURL(metadata, q, fmt.Sprintf("%d", pageNum))
 			nextResp, err := i.requester.GetDocument(ctx, nextURL)
 			if err != nil {
@@ -182,8 +192,23 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			links = filterBluDVSearchLinks(rawQ, requestedSeason, extractBluDVSearchLinks(nextDoc))
+			matched, pending = filterBluDVSearchLinks(rawQ, requestedSeason, extractBluDVSearchLinks(nextDoc))
+			pendingLinks = append(pendingLinks, pending...)
 		}
+
+		// Only when no post title matched the request: bludv localizes its titles,
+		// so a query in the original language has to be confirmed inside the posts.
+		if len(matched) == 0 && len(pendingLinks) > 0 {
+			confirmed := resolveBluDVPendingLinks(ctx, i, r, rawQ, targetURL, pendingLinks)
+			titleConfirmedDetails = make(map[string]bool, len(confirmed))
+			for _, link := range confirmed {
+				titleConfirmedDetails[link.URL] = true
+			}
+
+			matched = confirmed
+		}
+
+		links = matched
 	}
 	linkURLs := bludvSearchLinkURLs(links)
 
@@ -202,7 +227,7 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 	for _, processor := range i.postProcessors {
 		postProcessedTorrents = processor(i, r, postProcessedTorrents)
 	}
-	postProcessedTorrents = filterBluDVSeasonResults(rawQ, postProcessedTorrents)
+	postProcessedTorrents = filterBluDVSeasonResults(rawQ, postProcessedTorrents, titleConfirmedDetails)
 
 	w.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(w).Encode(Response{
@@ -244,8 +269,13 @@ func extractBluDVSearchLinks(doc *goquery.Document) []bludvSearchLink {
 	return links
 }
 
-func filterBluDVSearchLinks(q, requestedSeason string, links []bludvSearchLink) []bludvSearchLink {
-	filtered := make([]bludvSearchLink, 0, len(links))
+// filterBluDVSearchLinks splits the search results into the links whose own
+// title already matches the request and the ones that only match the requested
+// season. The latter are pending: bludv publishes localized titles, so a search
+// coming from Sonarr in the original language (e.g. "stuart fails to save the
+// universe" for "Stuart Não Consegue Salvar o Universo") can only be confirmed
+// by reading the title fields inside the post — see resolveBluDVPendingLinks.
+func filterBluDVSearchLinks(q, requestedSeason string, links []bludvSearchLink) (matched, pending []bludvSearchLink) {
 	for _, link := range links {
 		title := link.Title
 		if title == "" {
@@ -253,12 +283,91 @@ func filterBluDVSearchLinks(q, requestedSeason string, links []bludvSearchLink) 
 		}
 
 		season := extractBluDVSeason(fmt.Sprintf("%s %s", title, link.URL))
-		if season == requestedSeason && matchesBluDVRequestedTitle(q, title) {
-			filtered = append(filtered, link)
+		if season != requestedSeason {
+			continue
+		}
+
+		if matchesBluDVRequestedTitle(q, title) {
+			matched = append(matched, link)
+			continue
+		}
+
+		pending = append(pending, link)
+	}
+
+	return matched, pending
+}
+
+// resolveBluDVPendingLinks keeps the pending candidates whose post identifies
+// the requested show through one of its title fields. The comparison is the same
+// strict one used for the post title, so a post is only accepted when a field
+// holds exactly the requested title — a franchise sharing a word (e.g. "Rick and
+// Morty Multiverso") stays rejected.
+func resolveBluDVPendingLinks(ctx context.Context, i *Indexer, r *http.Request, q, referer string, candidates []bludvSearchLink) []bludvSearchLink {
+	if len(candidates) > bludvMaxLocalizedTitleChecks {
+		logging.WarnWithRequest(r).
+			Int("candidates", len(candidates)).
+			Int("checked", bludvMaxLocalizedTitleChecks).
+			Msg("Too many BLUDV posts pending a title check, ignoring the remaining ones")
+		candidates = candidates[:bludvMaxLocalizedTitleChecks]
+	}
+
+	return utils.ParallelFlatMap(candidates, func(candidate bludvSearchLink) ([]bludvSearchLink, error) {
+		doc, err := getDocument(ctx, i, candidate.URL, referer)
+		if err != nil {
+			return nil, err
+		}
+
+		titles := extractBluDVPostTitles(doc.Find(".post div.content"))
+		if !matchesAnyBluDVPostTitle(q, titles) {
+			logging.DebugWithRequest(r).
+				Str("url", candidate.URL).
+				Strs("post_titles", titles).
+				Msg("Discarding BLUDV post: no title field matches the request")
+			return nil, nil
+		}
+
+		return []bludvSearchLink{candidate}, nil
+	})
+}
+
+// extractBluDVPostTitles reads the title fields bludv publishes in the post body
+// ("Título Original", "Título Traduzido", ...). The original title comes first,
+// as it is the one a search in the original language matches.
+func extractBluDVPostTitles(content *goquery.Selection) []string {
+	htmlContent, err := content.Html()
+	if err != nil {
+		return nil
+	}
+
+	// Line breaks delimit the fields, so keep them before dropping the markup.
+	text := bludvLineBreakTagRE.ReplaceAllString(htmlContent, "\n")
+	text = html.UnescapeString(bludvHTMLTagRE.ReplaceAllString(text, " "))
+	text = strings.ReplaceAll(text, "\u00a0", " ")
+
+	var titles []string
+	if matches := bludvOriginalTitleRE.FindStringSubmatch(text); len(matches) > 1 {
+		titles = append(titles, strings.Join(strings.Fields(matches[1]), " "))
+	}
+
+	for _, matches := range bludvPostTitleFieldRE.FindAllStringSubmatch(text, -1) {
+		title := strings.Join(strings.Fields(matches[1]), " ")
+		if title != "" && !slices.Contains(titles, title) {
+			titles = append(titles, title)
 		}
 	}
 
-	return filtered
+	return titles
+}
+
+func matchesAnyBluDVPostTitle(q string, titles []string) bool {
+	for _, title := range titles {
+		if matchesBluDVRequestedTitle(q, title) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func bludvSearchLinkURLs(links []bludvSearchLink) []string {
@@ -298,7 +407,11 @@ func replaceBluDVSeasonEpisodeWithSeason(q string, re *regexp.Regexp) string {
 	})
 }
 
-func filterBluDVSeasonResults(q string, torrents []schema.IndexedTorrent) []schema.IndexedTorrent {
+// filterBluDVSeasonResults keeps the results of the requested season whose title
+// matches the request. Posts already confirmed by their title fields are listed
+// in titleConfirmedDetails (keyed by post URL) and only need the season check,
+// as their localized title never matches a query in the original language.
+func filterBluDVSeasonResults(q string, torrents []schema.IndexedTorrent, titleConfirmedDetails map[string]bool) []schema.IndexedTorrent {
 	requestedSeason := extractBluDVSeason(q)
 	if requestedSeason == "" {
 		return torrents
@@ -308,7 +421,11 @@ func filterBluDVSeasonResults(q string, torrents []schema.IndexedTorrent) []sche
 	for _, it := range torrents {
 		title := fmt.Sprintf("%s %s", it.Title, it.OriginalTitle)
 		season := extractBluDVSeason(fmt.Sprintf("%s %s", title, it.Details))
-		if season == requestedSeason && matchesBluDVRequestedTitle(q, title) {
+		if season != requestedSeason {
+			continue
+		}
+
+		if titleConfirmedDetails[it.Details] || matchesBluDVRequestedTitle(q, title) {
 			filtered = append(filtered, it)
 		}
 	}

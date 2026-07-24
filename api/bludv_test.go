@@ -1,7 +1,11 @@
 package handler
 
 import (
+	"slices"
+	"strings"
 	"testing"
+
+	"github.com/PuerkitoBio/goquery"
 
 	"github.com/leandrotsampa/torrent-indexer/schema"
 )
@@ -64,7 +68,7 @@ func TestFilterBluDVSeasonResultsKeepsRequestedSeason(t *testing.T) {
 		{Title: "Rick and Morty S01 WEB-DL"},
 	}
 
-	got := filterBluDVSeasonResults("rick and morty temporada 1 episodio 2", torrents)
+	got := filterBluDVSeasonResults("rick and morty temporada 1 episodio 2", torrents, nil)
 
 	if len(got) != 2 {
 		t.Fatalf("got %d torrents, want 2", len(got))
@@ -85,7 +89,7 @@ func TestFilterBluDVSeasonResultsRejectsAppendedTitleWithoutSeparator(t *testing
 		{OriginalTitle: "Rick and Morty 1a Temporada Torrent"},
 	}
 
-	got := filterBluDVSeasonResults("rick e morty s01e01", torrents)
+	got := filterBluDVSeasonResults("rick e morty s01e01", torrents, nil)
 
 	if len(got) != 1 {
 		t.Fatalf("got %d torrents, want 1", len(got))
@@ -103,7 +107,7 @@ func TestFilterBluDVSeasonResultsKeepsLocalizedSubtitle(t *testing.T) {
 		{OriginalTitle: "Georgie e Mandy Seu Primeiro Casamento 1a Temporada (2024)"},
 	}
 
-	got := filterBluDVSeasonResults("georgie e mandy temporada 2", torrents)
+	got := filterBluDVSeasonResults("georgie e mandy temporada 2", torrents, nil)
 
 	if len(got) != 1 {
 		t.Fatalf("got %d torrents, want 1", len(got))
@@ -119,7 +123,7 @@ func TestFilterBluDVSeasonResultsReturnsEmptyWhenSeasonDoesNotMatch(t *testing.T
 		{OriginalTitle: "Rick and Morty 5a Temporada Torrent"},
 	}
 
-	got := filterBluDVSeasonResults("rick and morty s01e02", torrents)
+	got := filterBluDVSeasonResults("rick and morty s01e02", torrents, nil)
 
 	if len(got) != 0 {
 		t.Fatalf("got %d torrents, want 0", len(got))
@@ -142,13 +146,143 @@ func TestFilterBluDVSearchLinksKeepsRequestedTitleAndSeason(t *testing.T) {
 		{URL: "https://bludv2.xyz/rick-and-morty-1a-temporada/", Title: "Rick and Morty 1a Temporada"},
 	}
 
-	got := filterBluDVSearchLinks("rick e morty s01e01", "1", links)
+	got, pending := filterBluDVSearchLinks("rick e morty s01e01", "1", links)
 
 	if len(got) != 1 {
 		t.Fatalf("got %d links, want 1", len(got))
 	}
 	if got[0].URL != "https://bludv2.xyz/rick-and-morty-1a-temporada/" {
 		t.Fatalf("URL = %q", got[0].URL)
+	}
+	// The spin-off shares the requested season, so it is only pending: it stays
+	// out of the results unless one of its title fields matches the request.
+	if len(pending) != 1 || pending[0].URL != "https://bludv2.xyz/rick-and-morty-multiverso-1a-temporada/" {
+		t.Fatalf("pending = %+v", pending)
+	}
+}
+
+func TestFilterBluDVSearchLinksReportsLocalizedTitleAsPending(t *testing.T) {
+	// Sonarr searches in the original language while bludv titles the post in
+	// Portuguese, so the link can only be confirmed by reading the post.
+	links := []bludvSearchLink{
+		{
+			URL:   "https://bludv2.xyz/stuart-nao-consegue-salvar-o-universo-1a-temporada/",
+			Title: "Stuart Não Consegue Salvar o Universo 1ª Temporada Torrent (2026) WEB-DL 1080p Dual Áudio",
+		},
+	}
+
+	matched, pending := filterBluDVSearchLinks("stuart fails to save the universe temporada 1", "1", links)
+
+	if len(matched) != 0 {
+		t.Fatalf("got %d matched links, want 0", len(matched))
+	}
+	if len(pending) != 1 {
+		t.Fatalf("got %d pending links, want 1", len(pending))
+	}
+}
+
+func TestFilterBluDVSearchLinksIgnoresOtherSeasonsWhenPending(t *testing.T) {
+	links := []bludvSearchLink{
+		{URL: "https://bludv2.xyz/stuart-1a-temporada/", Title: "Stuart Não Consegue Salvar o Universo 1ª Temporada"},
+		{URL: "https://bludv2.xyz/stuart-2a-temporada/", Title: "Stuart Não Consegue Salvar o Universo 2ª Temporada"},
+	}
+
+	matched, pending := filterBluDVSearchLinks("stuart fails to save the universe temporada 2", "2", links)
+
+	if len(matched) != 0 {
+		t.Fatalf("got %d matched links, want 0", len(matched))
+	}
+	if len(pending) != 1 || pending[0].URL != "https://bludv2.xyz/stuart-2a-temporada/" {
+		t.Fatalf("pending = %+v", pending)
+	}
+}
+
+func TestExtractBluDVPostTitlesReadsOriginalTitleFirst(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`
+<div class="post"><div class="content">
+<p><span><strong><em>T&iacute;tulo Traduzido:</em></strong> Stuart N&atilde;o Consegue Salvar o Universo</span><br />
+<span><strong><em>T&iacute;tulo Original:</em></strong>&nbsp;Stuart Fails to Save the Universe</span><br />
+<span><strong><em>G&ecirc;nero:</em></strong> Com&eacute;dia | Fantasia | Fic&ccedil;&atilde;o</span></p>
+</div></div>`))
+	if err != nil {
+		t.Fatalf("failed to parse document: %v", err)
+	}
+
+	got := extractBluDVPostTitles(doc.Find(".post div.content"))
+	want := []string{"Stuart Fails to Save the Universe", "Stuart Não Consegue Salvar o Universo"}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("extractBluDVPostTitles() = %#v, want %#v", got, want)
+	}
+}
+
+func TestExtractBluDVPostTitlesFallsBackToOtherTitleFields(t *testing.T) {
+	// Posts that omit "Título Original" still name the show in another field.
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`
+<div class="post"><div class="content">
+<p><strong>Nome Original:</strong> Stuart Fails to Save the Universe<br />
+<strong>Ano de Lan&ccedil;amento:</strong> 2026</p>
+</div></div>`))
+	if err != nil {
+		t.Fatalf("failed to parse document: %v", err)
+	}
+
+	got := extractBluDVPostTitles(doc.Find(".post div.content"))
+	want := []string{"Stuart Fails to Save the Universe"}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("extractBluDVPostTitles() = %#v, want %#v", got, want)
+	}
+}
+
+func TestMatchesAnyBluDVPostTitleAcceptsOriginalTitle(t *testing.T) {
+	titles := []string{"Stuart Fails to Save the Universe", "Stuart Não Consegue Salvar o Universo"}
+
+	if !matchesAnyBluDVPostTitle("stuart fails to save the universe temporada 1", titles) {
+		t.Fatal("expected the post to match the requested original title")
+	}
+}
+
+func TestMatchesAnyBluDVPostTitleRejectsSimilarShow(t *testing.T) {
+	// A franchise sharing words with the request must stay rejected: the post
+	// title fields are compared as strictly as the post title itself.
+	titles := []string{"Rick and Morty Multiverse", "Rick and Morty Multiverso"}
+
+	if matchesAnyBluDVPostTitle("rick e morty temporada 1", titles) {
+		t.Fatal("expected the spin-off post to be rejected")
+	}
+}
+
+func TestMatchesAnyBluDVPostTitleRejectsPostWithoutTitleFields(t *testing.T) {
+	if matchesAnyBluDVPostTitle("stuart fails to save the universe temporada 1", nil) {
+		t.Fatal("expected a post without title fields to be rejected")
+	}
+}
+
+func TestFilterBluDVSeasonResultsKeepsTitleConfirmedPost(t *testing.T) {
+	confirmed := map[string]bool{"https://bludv2.xyz/stuart-1a-temporada/": true}
+	torrents := []schema.IndexedTorrent{
+		{
+			OriginalTitle: "Stuart Não Consegue Salvar o Universo S01E01 1ª Temporada",
+			Details:       "https://bludv2.xyz/stuart-1a-temporada/",
+		},
+		{
+			OriginalTitle: "Stuart Não Consegue Salvar o Universo S02E01 2ª Temporada",
+			Details:       "https://bludv2.xyz/stuart-1a-temporada/",
+		},
+		{
+			OriginalTitle: "Outra Série S01E01 1ª Temporada",
+			Details:       "https://bludv2.xyz/outra-serie-1a-temporada/",
+		},
+	}
+
+	got := filterBluDVSeasonResults("stuart fails to save the universe temporada 1", torrents, confirmed)
+
+	if len(got) != 1 {
+		t.Fatalf("got %d torrents, want 1", len(got))
+	}
+	if got[0].OriginalTitle != "Stuart Não Consegue Salvar o Universo S01E01 1ª Temporada" {
+		t.Fatalf("result = %q", got[0].OriginalTitle)
 	}
 }
 
