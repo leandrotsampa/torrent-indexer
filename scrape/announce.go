@@ -108,7 +108,10 @@ func (g *Goscrape) Announce(infohash []byte) (*AnnounceResult, error) {
 	for {
 		retries++
 
-		conn.SetWriteDeadline(time.Now().Add(g.timeout))
+		if err := conn.SetWriteDeadline(time.Now().Add(g.timeout)); err != nil {
+			return nil, err
+		}
+
 		n, err = conn.Write(buf)
 		if err != nil {
 			return nil, err
@@ -117,7 +120,10 @@ func (g *Goscrape) Announce(infohash []byte) (*AnnounceResult, error) {
 			return nil, ErrRequest
 		}
 
-		conn.SetReadDeadline(time.Now().Add(g.timeout))
+		if err := conn.SetReadDeadline(time.Now().Add(g.timeout)); err != nil {
+			return nil, err
+		}
+
 		n, err = conn.Read(response)
 		if err, ok := err.(net.Error); ok && err.Timeout() {
 			if retries > g.retries {
