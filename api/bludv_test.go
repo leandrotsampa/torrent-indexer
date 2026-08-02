@@ -429,3 +429,171 @@ func TestNormalizeBluDVReleaseEpisodeForSonarrDoesNotDuplicateEpisodeTag(t *test
 		t.Fatalf("normalizeBluDVReleaseEpisodeForSonarr() = %q, want %q", got, want)
 	}
 }
+
+func TestExtractBluDVMagnetLinksTagsPlainMagnetsWithTheirEpisode(t *testing.T) {
+	// bludv publishes one plain magnet per episode, announced by the text right
+	// before the anchor. Without reading it every episode would be indexed as a
+	// full-season pack, since the post title only names the season.
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`
+<div class="post"><div class="content">
+<p>T&iacute;tulo Original: Stuart Fails to Save the Universe<br />
+IMDb: <a href="https://www.imdb.com/pt/title/tt27497393/">7,0</a></p>
+<p><center><strong>EPIS&Oacute;DIO 01:</strong> <a href="magnet:?xt=urn:btih:aaa&#038;dn=Stuart%20S01E01" rel="noopener">1080p</a></center><br />
+<center><strong>EPIS&Oacute;DIO 02:</strong> <a href="magnet:?xt=urn:btih:bbb&#038;dn=Stuart%20S01E02" rel="noopener">1080p</a></center></p>
+<p><a href="https://watch.brplayer.xyz/stuart">ASSISTIR ONLINE</a></p>
+</div></div>`))
+	if err != nil {
+		t.Fatalf("failed to parse document: %v", err)
+	}
+
+	got := extractBluDVMagnetLinks(t.Context(), nil, doc.Find(".post div.content"), "")
+
+	if len(got) != 2 {
+		t.Fatalf("got %d magnet links, want 2: %+v", len(got), got)
+	}
+	if got[0].URL != "magnet:?xt=urn:btih:aaa&dn=Stuart%20S01E01" {
+		t.Fatalf("first URL = %q", got[0].URL)
+	}
+	if got[0].Episode != "1" || got[1].Episode != "2" {
+		t.Fatalf("episodes = %q, %q, want 1, 2", got[0].Episode, got[1].Episode)
+	}
+	if got[0].Label != "1080p" || got[1].Label != "1080p" {
+		t.Fatalf("labels = %q, %q", got[0].Label, got[1].Label)
+	}
+}
+
+func TestExtractBluDVMagnetLinksLeavesSeasonPackWithoutEpisode(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`
+<div class="post"><div class="content">
+<p>Qualidade: WEB-DL<br />
+<a href="magnet:?xt=urn:btih:aaa&#038;dn=Rick.and.Morty.S01.720p">720p</a><br />
+<a href="magnet:?xt=urn:btih:bbb&#038;dn=Rick.and.Morty.S01.1080p">1080p</a></p>
+</div></div>`))
+	if err != nil {
+		t.Fatalf("failed to parse document: %v", err)
+	}
+
+	got := extractBluDVMagnetLinks(t.Context(), nil, doc.Find(".post div.content"), "")
+
+	if len(got) != 2 {
+		t.Fatalf("got %d magnet links, want 2", len(got))
+	}
+	for _, link := range got {
+		if link.Episode != "" {
+			t.Fatalf("season pack link tagged with episode %q", link.Episode)
+		}
+	}
+}
+
+func TestExtractBluDVMagnetLinksIgnoresUnrelatedAnchors(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`
+<div class="post"><div class="content">
+<p><a href="https://bludvfilmes.xyz/series/">S&eacute;ries</a>
+<a href="https://www.youtube.com/watch?v=abc">Trailer</a>
+<a href="magnet:?xt=urn:btih:aaa">Magnet-Link</a></p>
+</div></div>`))
+	if err != nil {
+		t.Fatalf("failed to parse document: %v", err)
+	}
+
+	got := extractBluDVMagnetLinks(t.Context(), nil, doc.Find(".post div.content"), "")
+
+	if len(got) != 1 {
+		t.Fatalf("got %d magnet links, want 1: %+v", len(got), got)
+	}
+	if got[0].URL != "magnet:?xt=urn:btih:aaa" {
+		t.Fatalf("URL = %q", got[0].URL)
+	}
+}
+
+func TestExtractBluDVMagnetLinksClearsEpisodeOnSeasonPack(t *testing.T) {
+	// A whole-season download listed after the episodes must not inherit the
+	// episode above it.
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`
+<div class="post"><div class="content">
+<p><strong>EPIS&Oacute;DIO 01:</strong> <a href="magnet:?xt=urn:btih:aaa">1080p</a><br />
+<strong>EPIS&Oacute;DIO 02:</strong> <a href="magnet:?xt=urn:btih:bbb">1080p</a><br />
+<strong>TEMPORADA COMPLETA:</strong> <a href="magnet:?xt=urn:btih:ccc">1080p</a></p>
+</div></div>`))
+	if err != nil {
+		t.Fatalf("failed to parse document: %v", err)
+	}
+
+	got := extractBluDVMagnetLinks(t.Context(), nil, doc.Find(".post div.content"), "")
+
+	if len(got) != 3 {
+		t.Fatalf("got %d magnet links, want 3", len(got))
+	}
+	if got[2].Episode != "" {
+		t.Fatalf("season pack tagged with episode %q", got[2].Episode)
+	}
+}
+
+func TestExtractBluDVMagnetLinksTagsRangeOfEpisodes(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`
+<div class="post"><div class="content">
+<p><strong>EPIS&Oacute;DIOS 01 E 02:</strong> <a href="magnet:?xt=urn:btih:aaa">1080p</a><br />
+<strong>EPIS&Oacute;DIO 03:</strong> <a href="magnet:?xt=urn:btih:bbb">1080p</a></p>
+</div></div>`))
+	if err != nil {
+		t.Fatalf("failed to parse document: %v", err)
+	}
+
+	got := extractBluDVMagnetLinks(t.Context(), nil, doc.Find(".post div.content"), "")
+
+	if len(got) != 2 {
+		t.Fatalf("got %d magnet links, want 2", len(got))
+	}
+	if got[0].Episode != "1-2" || got[1].Episode != "3" {
+		t.Fatalf("episodes = %q, %q, want 1-2, 3", got[0].Episode, got[1].Episode)
+	}
+}
+
+func TestExtractBluDVEpisodeReadsRangeFromMagnetDisplayName(t *testing.T) {
+	// bludv ships a single torrent for two episodes, named "S01E01-02".
+	if got := extractBluDVEpisode("Cabo do Medo S01E01-02 WEB-DL 1080p x264 DUAL 5.1"); got != "1-2" {
+		t.Fatalf("extractBluDVEpisode() = %q, want %q", got, "1-2")
+	}
+}
+
+func TestNormalizeBluDVReleaseEpisodeForSonarrRendersRange(t *testing.T) {
+	got := normalizeBluDVReleaseEpisodeForSonarr("Cabo do Medo S01 1a Temporada Torrent - WEB-DL 1080p", "1-2")
+	want := "Cabo do Medo S01E01-E02 1a Temporada Torrent - WEB-DL 1080p"
+
+	if got != want {
+		t.Fatalf("normalizeBluDVReleaseEpisodeForSonarr() = %q, want %q", got, want)
+	}
+}
+
+func TestBluDVEpisodeFromContextUsesClosestLabel(t *testing.T) {
+	// The text between two anchors ends with the label of the next link, so the
+	// last occurrence is the one that belongs to it.
+	if got := bludvEpisodeFromContext("Episódio 01: 1080p Episódio 02:", "1"); got != "2" {
+		t.Fatalf("bludvEpisodeFromContext() = %q, want %q", got, "2")
+	}
+}
+
+func TestBluDVEpisodeFromContextCarriesEpisodeOver(t *testing.T) {
+	// The resolutions of one episode are listed side by side, separated by text
+	// that names no episode.
+	if got := bludvEpisodeFromContext(" | ", "3"); got != "3" {
+		t.Fatalf("bludvEpisodeFromContext() = %q, want %q", got, "3")
+	}
+}
+
+func TestBluDVEpisodeFromContextKeepsEpisodeAnnouncedAfterMarker(t *testing.T) {
+	// The season heading opens the list, so the episode label that follows it
+	// still wins.
+	if got := bludvEpisodeFromContext("TEMPORADA COMPLETA: 1080p EPISÓDIO 04:", ""); got != "4" {
+		t.Fatalf("bludvEpisodeFromContext() = %q, want %q", got, "4")
+	}
+}
+
+func TestExtractBluDVEpisodeReadsMagnetDisplayName(t *testing.T) {
+	// Fallback for posts that do not label the link: the magnet display name
+	// carries the episode.
+	got := extractBluDVEpisode("Stuart Não Consegue Salvar o Universo S01E02 WEB-DL 1080p x264 DUAL 5.1")
+	if got != "2" {
+		t.Fatalf("extractBluDVEpisode() = %q, want %q", got, "2")
+	}
+}

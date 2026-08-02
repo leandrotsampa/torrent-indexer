@@ -51,13 +51,22 @@ var (
 	bludvSeasonOnlyQueryRE     = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}\b|\be0*[0-9]{1,3}\b|\btemporada\s+0*[0-9]{1,3}\b|\bepis.?dio\s+0*[0-9]{1,3}\b`)
 	bludvSeasonInReleaseNameRE = regexp.MustCompile(`(?i)\b0*([0-9]{1,3})\D{0,6}temporada\b|\btemporada\D{0,6}0*([0-9]{1,3})\b|\bs0*([0-9]{1,3})(?:[\s._-]*e0*[0-9]{1,3})?\b`)
 	bludvEpisodeInReleaseRE    = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}[\s._-]*e0*([0-9]{1,3})\b|\be0*([0-9]{1,3})\b|\bep(?:is.?dio|isode)?\.?\s*0*([0-9]{1,3})\b`)
+	// bludvEpisodeRangeRE matches a release covering more than one episode,
+	// either as the post announces it ("EPISÓDIOS 01 E 02") or as the magnet
+	// names it ("S01E01-02").
+	bludvEpisodeRangeRE = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}[\s._-]*e0*([0-9]{1,3})\s*[-–—]\s*e?0*([0-9]{1,3})\b|\bep(?:is.?dios?|isodes?)?\.?\s*0*([0-9]{1,3})\s*(?:[-–—]|a|at.|e|and|&)\s*(?:ep(?:is.?dios?|isodes?)?\.?\s*)?0*([0-9]{1,3})\b`)
+	// bludvFullSeasonMarkerRE matches the headings a post uses to announce a
+	// whole-season download, so a pack listed after the individual episodes is
+	// not mistaken for the episode above it.
+	bludvFullSeasonMarkerRE    = regexp.MustCompile(`(?i)\btemporada\s+completa\b|\bcomplet[ao]\s+temporada\b|\btodos\s+os\s+epis.dios\b|\bseason\s+pack\b|\bpack\s+(?:completo|da\s+temporada)\b`)
 	bludvConjunctionQueryRE    = regexp.MustCompile(`(?i)\b(and|es|y|et)\b`)
 	bludvSonarrSeasonEpisodeRE = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}[\s._-]*e0*[0-9]{1,3}\b`)
 	bludvSonarrSeasonRE        = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}\b`)
 	bludvMultiResolutionRE     = regexp.MustCompile(`(?i)\b(?:480p|720p|1080p|2160p|4k)\b(?:\s*(?:[/|,]|\bor\b|\band\b|\be\b|\bou\b)\s*\b(?:480p|720p|1080p|2160p|4k)\b)+`)
 	bludvResolutionRE          = regexp.MustCompile(`(?i)\b(?:480p|720p|1080p|2160p|4k)\b`)
 	bludvNonWordRE             = regexp.MustCompile(`[^a-z0-9]+`)
-	bludvSystemAdsAnchorRE     = regexp.MustCompile(`(?is)<a\s+[^>]*href=["']([^"']*systemads\d*\.[a-z]+/go\.php[^"']*)["'][^>]*>(.*?)</a>`)
+	bludvAnchorRE              = regexp.MustCompile(`(?is)<a(?:\s[^>]*?)?\shref\s*=\s*["']([^"']*)["'][^>]*>(.*?)</a>`)
+	bludvSystemAdsHrefRE       = regexp.MustCompile(`(?i)systemads\d*\.[a-z]+/go\.php`)
 	bludvHTMLTagRE             = regexp.MustCompile(`(?is)<[^>]+>`)
 	bludvSubtitleSeparatorRE   = regexp.MustCompile(`[:|–]|\s-\s`)
 	bludvLineBreakTagRE        = regexp.MustCompile(`(?is)<br\s*/?>|</(?:p|div|li|tr|h[1-6])>`)
@@ -93,6 +102,14 @@ var bludvComparableTextReplacer = strings.NewReplacer(
 	"ª", "a",
 	"º", "o",
 )
+
+// bludvAdwareDomains lists the gateways that hide the magnet link inside an
+// "id" query param, encoded with the reversed-base64 scheme of DecodeAdLink.
+var bludvAdwareDomains = []string{
+	"https://www.seuvideo.xyz",
+	"https://www.systemads.org",
+	"https://superadsgo.xyz",
+}
 
 var bludvIgnoredTitleTokens = map[string]bool{
 	"torrent":   true,
@@ -448,19 +465,92 @@ func extractBluDVSeason(text string) string {
 	return ""
 }
 
+// extractBluDVEpisode returns the first episode named in the text, as "3" for a
+// single episode or "1-2" for a release covering a range of them.
 func extractBluDVEpisode(text string) string {
-	matches := bludvEpisodeInReleaseRE.FindStringSubmatch(text)
-	if len(matches) == 0 {
+	return bludvEpisodeAt(text, bludvEpisodeRangeRE.FindStringSubmatchIndex(text), bludvEpisodeInReleaseRE.FindStringSubmatchIndex(text))
+}
+
+// bludvEpisodeFromContext reads which episode a download anchor belongs to from
+// the text preceding it. Only the label closest to the link counts, as that text
+// spans everything since the previous anchor; when it names no episode the
+// current one carries over, since the resolutions of a single episode are listed
+// side by side. A full-season heading closer to the link than any episode label
+// clears it: the link is a season pack listed among the individual episodes.
+func bludvEpisodeFromContext(text, current string) string {
+	rangeMatch := lastBluDVMatch(bludvEpisodeRangeRE, text)
+	singleMatch := lastBluDVMatch(bludvEpisodeInReleaseRE, text)
+
+	episodeStart := -1
+	if rangeMatch != nil {
+		episodeStart = rangeMatch[0]
+	}
+	if singleMatch != nil && singleMatch[0] > episodeStart {
+		episodeStart = singleMatch[0]
+	}
+
+	if marker := lastBluDVMatch(bludvFullSeasonMarkerRE, text); marker != nil && marker[0] > episodeStart {
 		return ""
 	}
 
-	for _, match := range matches[1:] {
-		if match != "" {
-			return normalizeBluDVSeasonNumber(match)
+	if episode := bludvEpisodeAt(text, rangeMatch, singleMatch); episode != "" {
+		return episode
+	}
+
+	return current
+}
+
+// bludvEpisodeAt formats whichever of the two matches is closer to the point of
+// interest. On a tie the range wins, as it is the more specific reading of the
+// same text ("S01E01-02" also matches as the single episode "S01E01").
+func bludvEpisodeAt(text string, rangeMatch, singleMatch []int) string {
+	if rangeMatch != nil && (singleMatch == nil || rangeMatch[0] <= singleMatch[0]) {
+		first, last := bludvSubmatchPair(rangeMatch, text)
+		if first != "" && last != "" {
+			return fmt.Sprintf("%s-%s", first, last)
 		}
 	}
 
-	return ""
+	if singleMatch == nil {
+		return ""
+	}
+
+	first, _ := bludvSubmatchPair(singleMatch, text)
+
+	return first
+}
+
+// bludvSubmatchPair returns the first two non-empty capture groups of a match,
+// so the same helper serves both the single-episode and the range patterns
+// regardless of which alternative of the pattern matched.
+func bludvSubmatchPair(match []int, text string) (string, string) {
+	var groups []string
+	for idx := 2; idx+1 < len(match); idx += 2 {
+		if match[idx] < 0 {
+			continue
+		}
+
+		groups = append(groups, normalizeBluDVSeasonNumber(text[match[idx]:match[idx+1]]))
+		if len(groups) == 2 {
+			return groups[0], groups[1]
+		}
+	}
+
+	if len(groups) == 1 {
+		return groups[0], ""
+	}
+
+	return "", ""
+}
+
+// lastBluDVMatch returns the rightmost match of the pattern, or nil.
+func lastBluDVMatch(re *regexp.Regexp, text string) []int {
+	matches := re.FindAllStringSubmatchIndex(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	return matches[len(matches)-1]
 }
 
 func matchesBluDVRequestedTitle(q, title string) bool {
@@ -645,12 +735,24 @@ func formatBluDVSeasonTag(season string) string {
 	return "S" + season
 }
 
+// formatBluDVEpisodeTag renders a single episode as "E01" and a range as
+// "E01-E02", the form Sonarr reads as a multi-episode release.
 func formatBluDVEpisodeTag(episode string) string {
-	if len(episode) == 1 {
-		episode = "0" + episode
+	first, last, isRange := strings.Cut(episode, "-")
+	tag := "E" + padBluDVEpisodeNumber(first)
+	if isRange {
+		tag += "-E" + padBluDVEpisodeNumber(last)
 	}
 
-	return "E" + episode
+	return tag
+}
+
+func padBluDVEpisodeNumber(episode string) string {
+	if len(episode) == 1 {
+		return "0" + episode
+	}
+
+	return episode
 }
 
 func normalizeBluDVReleaseQualityForSonarr(title, releaseTitle string, torrentIndex, torrentCount int, sizes []string) string {
@@ -797,44 +899,115 @@ func shouldAppendBluDVTransmissionTrackers() bool {
 	return value == "1" || value == "true" || value == "yes"
 }
 
-func extractBluDVSystemAdsMagnetLinks(ctx context.Context, i *Indexer, content *goquery.Selection, referer string) []bludvMagnetLink {
-	htmlContent, err := content.Html()
-	if err != nil {
-		return nil
-	}
-
-	matches := bludvSystemAdsAnchorRE.FindAllStringSubmatchIndex(htmlContent, -1)
-	links := make([]bludvMagnetLink, 0, len(matches))
-	currentEpisode := ""
-	lastEnd := 0
-
-	for _, match := range matches {
-		between := cleanBluDVHTMLText(htmlContent[lastEnd:match[0]])
-		if episode := extractBluDVEpisode(between); episode != "" {
-			currentEpisode = episode
-		}
-
-		href := html.UnescapeString(htmlContent[match[2]:match[3]])
-		label := cleanBluDVHTMLText(htmlContent[match[4]:match[5]])
-		if len(extractBluDVResolutions(label)) != 1 {
-			label = strings.Join(strings.Fields(fmt.Sprintf("%s %s", between, label)), " ")
-		}
-		magnetLink, err := getMagnetFromSystemAds(ctx, i, href, referer)
+// extractBluDVMagnetLinks reads every download anchor of the post — plain
+// magnets as well as the ad gateways — in document order, carrying over the
+// episode announced right before each one ("EPISÓDIO 01:"). Without that
+// context a post publishing one magnet per episode would be indexed as a set of
+// identical full-season packs, since the post title only names the season.
+func extractBluDVMagnetLinks(ctx context.Context, i *Indexer, content *goquery.Selection, referer string) []bludvMagnetLink {
+	var links []bludvMagnetLink
+	content.Each(func(_ int, s *goquery.Selection) {
+		htmlContent, err := s.Html()
 		if err != nil {
-			logging.Warn().Err(err).Str("href", href).Msg("Failed to decode systemads link")
-			lastEnd = match[1]
-			continue
+			return
 		}
 
-		links = append(links, bludvMagnetLink{
-			URL:     magnetLink,
-			Label:   label,
-			Episode: currentEpisode,
-		})
-		lastEnd = match[1]
-	}
+		currentEpisode := ""
+		lastEnd := 0
+		for _, match := range bludvAnchorRE.FindAllStringSubmatchIndex(htmlContent, -1) {
+			href := html.UnescapeString(htmlContent[match[2]:match[3]])
+			if !isBluDVDownloadHref(href) {
+				continue
+			}
+
+			between := cleanBluDVHTMLText(htmlContent[lastEnd:match[0]])
+			lastEnd = match[1]
+			currentEpisode = bludvEpisodeFromContext(between, currentEpisode)
+
+			magnetLink, ok := resolveBluDVMagnetHref(ctx, i, href, referer)
+			if !ok {
+				continue
+			}
+
+			label := cleanBluDVHTMLText(htmlContent[match[4]:match[5]])
+			if len(extractBluDVResolutions(label)) != 1 {
+				label = strings.Join(strings.Fields(fmt.Sprintf("%s %s", between, label)), " ")
+			}
+
+			links = append(links, bludvMagnetLink{
+				URL:     magnetLink,
+				Label:   label,
+				Episode: currentEpisode,
+			})
+		}
+	})
 
 	return links
+}
+
+func isBluDVDownloadHref(href string) bool {
+	return strings.HasPrefix(href, "magnet:") ||
+		bludvSystemAdsHrefRE.MatchString(href) ||
+		isBluDVAdwareHref(href)
+}
+
+func isBluDVAdwareHref(href string) bool {
+	for _, domain := range bludvAdwareDomains {
+		if strings.HasPrefix(href, domain) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func resolveBluDVMagnetHref(ctx context.Context, i *Indexer, href, referer string) (string, bool) {
+	if strings.HasPrefix(href, "magnet:") {
+		return href, true
+	}
+
+	if bludvSystemAdsHrefRE.MatchString(href) {
+		magnetLink, err := getMagnetFromSystemAds(ctx, i, href, referer)
+		if err == nil {
+			return magnetLink, true
+		}
+
+		logging.Warn().Err(err).Str("href", href).Msg("Failed to decode systemads link")
+	}
+
+	if !isBluDVAdwareHref(href) {
+		return "", false
+	}
+
+	return decodeBluDVAdwareHref(href)
+}
+
+func decodeBluDVAdwareHref(href string) (string, bool) {
+	parsedURL, err := url.Parse(href)
+	if err != nil {
+		logging.Error().Err(err).Str("href", href).Msg("Failed to parse URL")
+		return "", false
+	}
+
+	decoded, err := utils.DecodeAdLink(parsedURL.Query().Get("id"))
+	if err != nil {
+		logging.Error().Err(err).Str("href", href).Msg("Failed to decode ad link")
+		return "", false
+	}
+
+	if strings.HasPrefix(decoded, "magnet:") {
+		return decoded, true
+	}
+
+	if !strings.Contains(decoded, "watch.brplayer") {
+		logging.Warn().
+			Str("href", href).
+			Str("decoded", decoded).
+			Str("indexer", bludv.Label).
+			Msg("Link decoding resulted in non-magnet link")
+	}
+
+	return "", false
 }
 
 func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]schema.IndexedTorrent, error) {
@@ -848,56 +1021,7 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 	title := strings.Replace(article.Find(".title > h1").Text(), " - Download", "", -1)
 	textContent := article.Find("div.content")
 	date := getPublishedDate(doc)
-	magnets := textContent.Find("a[href^=\"magnet\"]")
-	var magnetLinks []bludvMagnetLink
-	magnets.Each(func(i int, s *goquery.Selection) {
-		magnetLink, _ := s.Attr("href")
-		magnetLinks = append(magnetLinks, bludvMagnetLink{
-			URL:   magnetLink,
-			Label: strings.TrimSpace(s.Text()),
-		})
-	})
-	magnetLinks = append(magnetLinks, extractBluDVSystemAdsMagnetLinks(ctx, i, textContent, link)...)
-
-	adwareDomains := []string{
-		"https://www.seuvideo.xyz",
-		"https://www.systemads.org",
-		"https://superadsgo.xyz",
-	}
-
-	// Process adware links for each domain in the list
-	for _, domain := range adwareDomains {
-		adwareLinks := textContent.Find(fmt.Sprintf("a[href^=\"%s\"]", domain))
-		adwareLinks.Each(func(_ int, s *goquery.Selection) {
-			href, _ := s.Attr("href")
-			// extract querysting "id" from url
-			parsedUrl, err := url.Parse(href)
-			if err != nil {
-				logging.Error().Err(err).Str("href", href).Msg("Failed to parse URL")
-				return
-			}
-			magnetLink := parsedUrl.Query().Get("id")
-			magnetLinkDecoded, err := utils.DecodeAdLink(magnetLink)
-			if err != nil {
-				logging.Error().Err(err).Str("href", href).Msg("Failed to decode ad link")
-				return
-			}
-
-			// if decoded magnet link is indeed a magnet link, append it
-			if strings.HasPrefix(magnetLinkDecoded, "magnet:") {
-				magnetLinks = append(magnetLinks, bludvMagnetLink{
-					URL:   magnetLinkDecoded,
-					Label: strings.TrimSpace(s.Text()),
-				})
-			} else if !strings.Contains(magnetLinkDecoded, "watch.brplayer") {
-				logging.Warn().
-					Str("href", href).
-					Str("decoded", magnetLinkDecoded).
-					Str("indexer", bludv.Label).
-					Msg("Link decoding resulted in non-magnet link")
-			}
-		})
-	}
+	magnetLinks := extractBluDVMagnetLinks(ctx, i, textContent, link)
 
 	var audio []schema.Audio
 	var year string
@@ -956,6 +1080,14 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 			trackers := parsedMagnet.Trackers
 			magnetAudio := getAudioFromTitle(releaseTitle, audio)
 
+			// The magnet display name is the name of the release itself, so it
+			// decides which episode this is; the label the post puts before the
+			// link only answers for the magnets that carry no name.
+			episode := extractBluDVEpisode(releaseTitle)
+			if episode == "" {
+				episode = magnetLink.Episode
+			}
+
 			peer, seed, err := goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, trackers)
 			if err != nil {
 				logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
@@ -965,7 +1097,7 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 			var mySize string
 			if len(size) == len(magnetLinks) {
 				mySize = size[it]
-			} else if len(size) == 1 && magnetLink.Episode == "" {
+			} else if len(size) == 1 && episode == "" {
 				mySize = size[0]
 			}
 			if mySize == "" {
@@ -976,7 +1108,7 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 			title = normalizeBluDVReleaseTitleForSonarr(title)
 			title = normalizeBluDVReleaseQualityForSonarr(title, releaseTitle, it, len(magnetLinks), size)
 			title = normalizeBluDVReleaseQualityFromLabelForSonarr(title, magnetLink.Label)
-			title = normalizeBluDVReleaseEpisodeForSonarr(title, magnetLink.Episode)
+			title = normalizeBluDVReleaseEpisodeForSonarr(title, episode)
 
 			downloadMagnetLink := magnetLink.URL
 			if shouldAppendBluDVTransmissionTrackers() {
