@@ -327,7 +327,13 @@ func buildEraiRawsIndexedTorrents(ctx context.Context, i *Indexer, item eraiRaws
 		if releaseTitle == "" {
 			releaseTitle = strings.TrimSpace(item.Title)
 		}
-		audio := getAudioFromTitle(releaseTitle, append(findAudioFromText(releaseTitle), schema.AudioJapanese))
+		// "(JA)"/"(KA)" name the dub the file carries, so they win over the
+		// japanese default — a korean production also ships a korean audio track.
+		releaseAudio := findAnimeAudioFromTitle(releaseTitle)
+		if len(releaseAudio) == 0 {
+			releaseAudio = append(findAudioFromText(releaseTitle), schema.AudioJapanese)
+		}
+		audio := getAudioFromTitle(releaseTitle, releaseAudio)
 		infoHash := parsedMagnet.InfoHash.String()
 		peer, seed, err := goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, parsedMagnet.Trackers)
 		if err != nil {

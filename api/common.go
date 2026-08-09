@@ -430,7 +430,7 @@ func getAudioFromTitle(releaseTitle string, audioFromContent []schema.Audio) []s
 		magnetAudio = append(magnetAudio, schema.AudioPortuguese)
 	}
 
-	if strings.Contains(strings.ToLower(releaseTitle), "dual") || strings.Contains(strings.ToLower(releaseTitle), "dublado") {
+	if strings.Contains(strings.ToLower(releaseTitle), "dual") || strings.Contains(strings.ToLower(releaseTitle), "dublado") || isMultiAudioTitle(releaseTitle) {
 		magnetAudio = append(magnetAudio, audioFromContent...)
 		// if Portuguese audio is not in the audio slice, append it
 		if !slices.Contains(magnetAudio, schema.AudioPortuguese) {

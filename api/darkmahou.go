@@ -363,6 +363,12 @@ func getTorrentsDarkmahou(ctx context.Context, i *Indexer, link, referer string)
 	// best-effort metadata from the info/synopsis area
 	infoText := doc.Find("div.entry-content, div.info, div.bigcontent .infox").Text()
 	audio := findAudioFromText(infoText)
+	if len(audio) == 0 {
+		// The pages rarely name the audio track: these are subbed anime releases,
+		// so the audio is Japanese unless a release says otherwise (a "Dublado"
+		// title adds Portuguese in getAudioFromTitle).
+		audio = []schema.Audio{schema.AudioJapanese}
+	}
 	year := findYearFromText(infoText, title)
 
 	magnetLinks := extractDarkmahouMagnetLinks(doc, key)
@@ -398,7 +404,14 @@ func getTorrentsDarkmahou(ctx context.Context, i *Indexer, link, referer string)
 			// season packs and each quality are distinguishable. .torrent links
 			// (e.g. nyaa) carry no display name and always use the label.
 			releaseTitle := chooseDarkmahouReleaseTitle(displayName, title, magnetLink.Label)
-			magnetAudio := getAudioFromTitle(releaseTitle, audio)
+			// The release name is more reliable than the page: a single anime page
+			// lists every dub of the same episode, so "(KA)" and "(JA)" are what
+			// tell the korean audio apart from the japanese one.
+			releaseAudio := findAnimeAudioFromTitle(releaseTitle)
+			if len(releaseAudio) == 0 {
+				releaseAudio = audio
+			}
+			magnetAudio := getAudioFromTitle(releaseTitle, releaseAudio)
 
 			originalTitle := processTitle(title, magnetAudio)
 
