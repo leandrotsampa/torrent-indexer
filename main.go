@@ -103,6 +103,9 @@ func main() {
 	indexerMux.HandleFunc("/indexers/erai_raws", indexers.HandlerEraiRawsIndexer)
 	indexerMux.HandleFunc("/indexers/darkmahou", indexers.HandlerDarkmahouIndexer)
 	indexerMux.HandleFunc("/indexers/manual", indexers.HandlerManualIndexer)
+	// Torznab feeds: same searches, rendered in the protocol Sonarr/Radarr and
+	// Prowlarr speak, which is what carries the audio/subtitle languages.
+	indexerMux.HandleFunc(handler.TorznabPathPrefix, indexers.HandlerTorznab)
 	indexerMux.HandleFunc("/search", search.SearchTorrentHandler)
 	indexerMux.HandleFunc("/search/health", search.HealthHandler)
 	indexerMux.HandleFunc("/search/stats", search.StatsHandler)

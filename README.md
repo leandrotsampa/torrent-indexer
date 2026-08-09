@@ -74,6 +74,47 @@ You can configure the server using the following environment variables:
 - `ERAI_RAWS_USERNAME`: (optional) Username for Erai-raws authenticated requests.
 - `ERAI_RAWS_PASSWORD`: (optional) Password for Erai-raws authenticated requests.
 - `ERAI_RAWS_COOKIE`: (optional) Raw Cookie header for Erai-raws, useful when the site requires a browser-authenticated session.
+
+## Torznab endpoint (audio languages)
+
+Besides the JSON API, every indexer is also served over **Torznab**, the protocol
+Sonarr/Radarr/Prowlarr already speak:
+
+```
+http://localhost:7006/torznab/<indexer>?t=caps
+http://localhost:7006/torznab/<indexer>?t=tvsearch&q=supergirl&season=1&ep=2
+http://localhost:7006/torznab/<indexer>?t=movie&q=superman
+http://localhost:7006/torznab/<indexer>?t=movie&imdbid=tt5950044
+```
+
+The reason it exists: Sonarr and Radarr read the release languages from the
+`<torznab:attr name="language">` attributes, mapping them **by name** through
+their own language lists. The Cardigann YML parser has no `languages` field
+([Prowlarr#2550](https://github.com/Prowlarr/Prowlarr/issues/2550)), so through a
+YML definition the audio metadata this indexer already knows is lost in the
+translation. Speaking Torznab directly is what gets it across:
+
+```xml
+<item>
+  <title>Supergirl S01 1ª Temporada BluRay 720p Dual Áudio</title>
+  <torznab:attr name="language" value="Portuguese (Brazil)"/>
+  <torznab:attr name="language" value="English"/>
+  <torznab:attr name="seeders" value="12"/>
+  <torznab:attr name="infohash" value="..."/>
+</item>
+```
+
+The feed reuses the very same search path as `/indexers/<name>` — cache,
+post-processors and the `audio`, `year`, `imdb`, `page`, `sortBy` and
+`sortDirection` filters all keep working from the Torznab URL. It also replicates
+the `keywordsfilters` of the YML definitions (`and|es|y|et → e`, `SxxEyy →
+temporada N`, and dropping the season markers for the anime indexers), which
+Prowlarr does not apply to a Generic Torznab indexer.
+
+Subtitles are deliberately left out: Sonarr/Radarr have no support for the
+torznab `subs` attribute ([Sonarr#7625](https://github.com/Sonarr/Sonarr/issues/7625))
+and Prowlarr does not forward it, so nothing would consume it.
+
 ## Integrating with Jackett
 
 You can integrate this indexer with Jackett by adding a new Torznab custom indexer. Here is an example of how to do it for the `bludv` indexer:
@@ -155,7 +196,17 @@ search:
 
 ## Integrating with Prowlarr
 
-You can integrate this indexer with Prowlarr by adding a custom definition. See [Adding a custom YML definition](https://wiki.servarr.com/prowlarr/indexers#adding-a-custom-yml-definition).
+The recommended way is **Generic Torznab**, which forwards the audio languages to
+Sonarr/Radarr (a YML definition cannot — see
+[Torznab endpoint](#torznab-endpoint-audio-languages)):
+
+1. *Settings → Indexers → Add Indexer → Generic Torznab*
+2. **Url**: `http://torrent-indexer:7006/torznab/bludv` (one indexer per URL)
+3. **Api Path**: `/api` (the default; the suffix is accepted) or clear it
+4. Leave the API key empty, **Test** and save.
+
+Alternatively, you can integrate through a custom YML definition — without the
+language attributes. See [Adding a custom YML definition](https://wiki.servarr.com/prowlarr/indexers#adding-a-custom-yml-definition).
 
 ```yaml
 ---

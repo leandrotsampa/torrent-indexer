@@ -100,6 +100,7 @@ func HandlerIndex(w http.ResponseWriter, r *http.Request) {
 	type Endpoints struct {
 		IndexerGeneric []EndpointDetail `json:"/indexers/{indexer_name}"`
 		Manual         []EndpointDetail `json:"/indexers/manual"`
+		Torznab        []EndpointDetail `json:"/torznab/{indexer_name}"`
 		Search         []EndpointDetail `json:"/search"`
 		UI             []EndpointDetail `json:"/ui/"`
 	}
@@ -145,6 +146,22 @@ func HandlerIndex(w http.ResponseWriter, r *http.Request) {
 				{
 					Method:      "GET",
 					Description: "Get all manual torrents",
+				},
+			},
+			Torznab: []EndpointDetail{
+				{
+					Method: "GET",
+					Description: "Torznab feed of the specified indexer, carrying the audio/subtitle languages as " +
+						"torznab attributes. Add it in Prowlarr as a \"Generic Torznab\" indexer, or straight into " +
+						"Sonarr/Radarr as a Torznab indexer. The \"/api\" suffix Prowlarr appends is accepted too.",
+					QueryParams: map[string]string{
+						"t":      "torznab function: caps, search, tvsearch or movie",
+						"q":      "search query",
+						"season": "season number (tvsearch)",
+						"ep":     "episode number (tvsearch)",
+						"imdbid": "imdb ID to search for (movie search, e.g. tt1234567)",
+						"limit":  "maximum number of results to return",
+					},
 				},
 			},
 			Search: []EndpointDetail{
