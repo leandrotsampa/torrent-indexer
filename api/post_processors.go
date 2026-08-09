@@ -28,8 +28,12 @@ func AppendAudioTags(_ *Indexer, _ *http.Request, torrents []schema.IndexedTorre
 		if it.Title == "" {
 			continue
 		}
-		// reprocess audio tags in case any middleware has changed the title
-		torrents[i].Audio = getAudioFromTitle(it.Title, it.Audio)
+		// Reprocess audio tags in case any middleware has changed the title, adding
+		// to what the indexer already knew instead of replacing it: a middleware
+		// may have swapped the title for the torrent name (see
+		// FullfilMissingMetadata), which usually does not repeat the dub marker
+		// the site published next to the download link.
+		audio := addAudio(it.Audio, getAudioFromTitle(it.Title, it.Audio))
 
 		// for each video file, get audio ISO639-2 code and append to title
 		for _, file := range it.Files {
@@ -37,10 +41,11 @@ func AppendAudioTags(_ *Indexer, _ *http.Request, torrents []schema.IndexedTorre
 			if !utils.IsVideoFile(file.Path) {
 				continue
 			}
-			torrents[i].Audio = getAudioFromTitle(file.Path, torrents[i].Audio)
+			audio = addAudio(audio, getAudioFromTitle(file.Path, audio))
 		}
 
-		torrents[i].Title = appendAudioISO639_2Code(torrents[i].Title, torrents[i].Audio)
+		torrents[i].Audio = audio
+		torrents[i].Title = appendAudioISO639_2Code(it.Title, audio)
 	}
 
 	return torrents

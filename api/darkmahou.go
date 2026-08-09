@@ -319,34 +319,69 @@ func buildDarkmahouReleaseTitle(pageTitle, label string) string {
 
 // extractDarkmahouMagnetLinks walks each download block (div.soraddl), using the
 // block heading as label and resolving every .slink anchor into a magnet link.
+//
+// Inside a block the links are split by rows, each labelled by its own cell:
+// "Baixar>>" for the original audio and "Dublado>>" for the dub. That row label
+// is the site stating which audio the links carry, so it is kept in the label —
+// it is more reliable than guessing from the torrent name, which often says
+// nothing about the dub.
 func extractDarkmahouMagnetLinks(doc *goquery.Document, key string) []darkmahouMagnetLink {
 	var magnetLinks []darkmahouMagnetLink
 	seen := map[string]bool{}
 
 	doc.Find("div.soraddl").Each(func(_ int, block *goquery.Selection) {
-		label := strings.TrimSpace(block.Find(".sorattl h3").First().Text())
-		block.Find(".slink a").Each(func(_ int, a *goquery.Selection) {
-			href, ok := a.Attr("href")
-			if !ok {
-				return
-			}
+		blockLabel := strings.TrimSpace(block.Find(".sorattl h3").First().Text())
 
-			resolved := resolveDarkmahouLink(strings.TrimSpace(href), key)
-			if resolved == "" || seen[resolved] {
-				return
-			}
-			seen[resolved] = true
+		collect := func(container *goquery.Selection, label string) {
+			container.Find(".slink a").Each(func(_ int, a *goquery.Selection) {
+				href, ok := a.Attr("href")
+				if !ok {
+					return
+				}
 
-			itemLabel := label
-			if text := strings.TrimSpace(a.Text()); text != "" {
-				itemLabel = strings.TrimSpace(fmt.Sprintf("%s %s", label, text))
-			}
+				resolved := resolveDarkmahouLink(strings.TrimSpace(href), key)
+				if resolved == "" || seen[resolved] {
+					return
+				}
+				seen[resolved] = true
 
-			magnetLinks = append(magnetLinks, darkmahouMagnetLink{URL: resolved, Label: itemLabel})
+				itemLabel := label
+				if text := strings.TrimSpace(a.Text()); text != "" {
+					itemLabel = strings.TrimSpace(fmt.Sprintf("%s %s", label, text))
+				}
+
+				magnetLinks = append(magnetLinks, darkmahouMagnetLink{URL: resolved, Label: itemLabel})
+			})
+		}
+
+		block.Find("tr").Each(func(_ int, row *goquery.Selection) {
+			collect(row, joinDarkmahouLabels(blockLabel, extractDarkmahouRowLabel(row)))
 		})
+
+		// Layouts with no download table, and any anchor left outside a row.
+		collect(block, blockLabel)
 	})
 
 	return magnetLinks
+}
+
+// darkmahouRowLabelTrimSet are the decorations the row labels carry ("Dublado>>").
+const darkmahouRowLabelTrimSet = "> :-"
+
+// extractDarkmahouRowLabel reads the label of a download row ("Baixar", "Dublado").
+func extractDarkmahouRowLabel(row *goquery.Selection) string {
+	return strings.Trim(strings.TrimSpace(row.Find("td.reso .res, td.reso, .res").First().Text()), darkmahouRowLabelTrimSet)
+}
+
+func joinDarkmahouLabels(labels ...string) string {
+	var parts []string
+	for _, label := range labels {
+		if label = strings.TrimSpace(label); label != "" {
+			parts = append(parts, label)
+		}
+	}
+
+	return strings.Join(parts, " ")
 }
 
 func getTorrentsDarkmahou(ctx context.Context, i *Indexer, link, referer string) ([]schema.IndexedTorrent, error) {
@@ -411,7 +446,10 @@ func getTorrentsDarkmahou(ctx context.Context, i *Indexer, link, referer string)
 			if len(releaseAudio) == 0 {
 				releaseAudio = audio
 			}
-			magnetAudio := getAudioFromTitle(releaseTitle, releaseAudio)
+			// The row label ("Dublado>>") is the site telling which audio the link
+			// carries, and the torrent name often does not repeat it, so both are
+			// read when looking for the dub markers.
+			magnetAudio := getAudioFromTitle(joinDarkmahouLabels(releaseTitle, magnetLink.Label), releaseAudio)
 
 			originalTitle := processTitle(title, magnetAudio)
 

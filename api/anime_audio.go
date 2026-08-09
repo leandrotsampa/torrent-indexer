@@ -2,6 +2,7 @@ package handler
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/leandrotsampa/torrent-indexer/schema"
@@ -62,4 +63,22 @@ func findAnimeAudioFromTitle(releaseTitle string) []schema.Audio {
 // than one audio track.
 func isMultiAudioTitle(releaseTitle string) bool {
 	return multiAudioTitleRE.MatchString(releaseTitle)
+}
+
+// addAudio merges the languages into the ones already known, ordered by their
+// ISO 639-2 code and without duplicates, comparing by code so the synonyms
+// ("Dublado", "Nacional") collapse into a single language.
+func addAudio(known []schema.Audio, found ...[]schema.Audio) []schema.Audio {
+	merged := slices.Clone(known)
+	for _, list := range found {
+		merged = append(merged, list...)
+	}
+
+	slices.SortFunc(merged, func(a, b schema.Audio) int {
+		return strings.Compare(a.String(), b.String())
+	})
+
+	return slices.CompactFunc(merged, func(a, b schema.Audio) bool {
+		return a.String() == b.String()
+	})
 }
