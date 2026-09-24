@@ -2,6 +2,7 @@ package requester
 
 import (
 	"net/http"
+	"os"
 
 	"github.com/leandrotsampa/torrent-indexer/utils"
 	"github.com/fereidani/httpdecompressor"
@@ -10,7 +11,13 @@ import (
 // spoofBrowserHeaders adds browser-like headers to spoof a real browser.
 // If referer is empty, it defaults to "https://google.com/"
 func spoofBrowserHeaders(req *http.Request, referer string) {
-	req.Header.Set("User-Agent", utils.SpoofedUserAgent)
+	// permite sobrepor o UA via env (ex.: sites que bloqueiam UA de browser
+	// quando o fingerprint TLS não corresponde)
+	if ua := os.Getenv("SPOOFED_USER_AGENT"); ua != "" {
+		req.Header.Set("User-Agent", ua)
+	} else {
+		req.Header.Set("User-Agent", utils.SpoofedUserAgent)
+	}
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 	req.Header.Set("Accept-Encoding", httpdecompressor.ACCEPT_ENCODING)

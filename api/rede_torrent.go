@@ -82,6 +82,9 @@ func (i *Indexer) HandlerRedeTorrentIndexer(w http.ResponseWriter, r *http.Reque
 		}
 	})
 	links = utils.StableUniq(links)
+	if len(links) == 0 {
+		logging.Debug().Str("url", url).Str("page_title", doc.Find("title").First().Text()).Msg("rede_torrent: 0 links na página de busca")
+	}
 
 	// if no links were indexed, expire the document in cache
 	if len(links) == 0 {
