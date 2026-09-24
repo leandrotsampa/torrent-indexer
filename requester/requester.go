@@ -79,8 +79,32 @@ func (i *Requster) GetDocument(ctx context.Context, url string, referer ...strin
 	// Add browser-like headers to spoof a real browser
 	spoofBrowserHeaders(req, ref)
 
-	resp, err := i.httpClient.Do(req)
-	if err != nil {
+	// retry the plain client a few times: some CDNs (ex.: Cloudflare na
+	// redestorrents.com) respondem 403 de forma intermitente para o mesmo
+	// cliente, e uma nova tentativa costuma passar
+	var resp *http.Response
+	for attempt := 0; attempt < 3; attempt++ {
+		resp, err = i.httpClient.Do(req)
+		if err != nil {
+			break
+		}
+		if resp.StatusCode < 400 {
+			break
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		resp = nil
+		select {
+		case <-ctx.Done():
+		case <-time.After(time.Duration(attempt+1) * time.Second):
+		}
+		req, err = http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request for url %s: %w", url, err)
+		}
+		spoofBrowserHeaders(req, ref)
+	}
+	if err != nil || resp == nil {
 		// try request with flare solverr
 		body, err = i.fs.Get(ctx, url, 3)
 		if err != nil {
@@ -111,7 +135,8 @@ func (i *Requster) GetDocument(ctx context.Context, url string, referer ...strin
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 	bodyByte = buf.Bytes()
-	if hasChallange(bodyByte) {
+	// fallback also on HTTP errors (ex.: 403 sem marcadores de challenge) ou corpo vazio
+	if hasChallange(bodyByte) || len(bodyByte) == 0 || (resp != nil && resp.StatusCode >= 400) {
 		// try request with flare solverr
 		body, err = i.fs.Get(ctx, url, 3)
 		if err != nil {
