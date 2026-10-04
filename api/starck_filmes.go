@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"net/url"
 	"strings"
 	"time"
@@ -20,7 +21,7 @@ import (
 
 var starck_filmes = IndexerMeta{
 	Label:       "starck_filmes",
-	URL:         utils.GetIndexerURLFromEnv("INDEXER_STARCK_FILMES_URL", "https://www.starckfilmes-v23.com/"),
+	URL:         utils.GetIndexerURLFromEnv("INDEXER_STARCK_FILMES_URL", "https://starckfilmesnet.com/"),
 	SearchURL:   "?s=",
 	PagePattern: "page/%s",
 }
@@ -79,9 +80,11 @@ func (i *Indexer) HandlerStarckFilmesIndexer(w http.ResponseWriter, r *http.Requ
 	}
 
 	var links []string
-	doc.Find(".item").Each(func(i int, s *goquery.Selection) {
-		link, _ := s.Find("div.sub-item > a").Attr("href")
-		links = append(links, link)
+	doc.Find("a.o-card").Each(func(i int, s *goquery.Selection) {
+		link, _ := s.Attr("href")
+		if link != "" {
+			links = append(links, link)
+		}
 	})
 
 	// if no links were indexed, expire the document in cache
@@ -121,59 +124,49 @@ func getTorrentStarckFilmes(ctx context.Context, i *Indexer, link, referer strin
 
 	date := getPublishedDateFromRawString(link)
 
-	post := doc.Find(".post")
-	capa := post.Find(".capa")
-	title := capa.Find(".post-description > h2").Text()
-	post_buttons := post.Find(".post-buttons")
-	magnets := post_buttons.Find("a[href^=\"magnet\"]")
+	// layout novo (starckfilmesnet.com): h1 "Título (ano)", downloads agrupados
+	// por áudio em sections .o-lista > header .o-grupo-nome + divs .o-arquivo
+	titleRe := regexp.MustCompile(`^(.*?)(?: Torrent)?\s*\((\d{4})\)`)
+	titleP := titleRe.FindStringSubmatch(doc.Find("h1").First().Text())
+	if len(titleP) < 2 {
+		return nil, fmt.Errorf("could not extract title from %s", link)
+	}
+	title := strings.TrimSpace(titleP[1])
+	year := ""
+	if len(titleP) >= 3 {
+		year = strings.TrimSpace(titleP[2])
+	}
+
 	var magnetLinks []string
-	magnets.Each(func(i int, s *goquery.Selection) {
-		magnetLink, _ := s.Attr("href")
-		magnetLinks = append(magnetLinks, magnetLink)
-	})
-	dataUs := post_buttons.Find("a[data-u]")
-	dataUs.Each(func(i int, s *goquery.Selection) {
-		dataU, _ := s.Attr("data-u")
-		magnetLink, err := utils.DecodeStarckDataU(dataU)
-		if err != nil {
-			logging.Warn().Err(err).Str("data_u", dataU).Msg("Failed to decode data-u attribute, skipping")
-			return
-		}
-		magnetLinks = append(magnetLinks, magnetLink)
+	var audio [][]schema.Audio
+	doc.Find("section.o-lista").Each(func(_ int, grupo *goquery.Selection) {
+		grupoNome := strings.TrimSpace(grupo.Find(".o-grupo-nome").First().Text())
+		grupo.Find(".o-arquivo").Each(func(_ int, arquivo *goquery.Selection) {
+			magnetLink, ok := arquivo.Find("a.o-baixar[href^='magnet']").Attr("href")
+			if !ok {
+				return
+			}
+			// magnets vêm URL-encoded
+			if decoded, err := url.QueryUnescape(magnetLink); err == nil {
+				magnetLink = decoded
+			}
+			magnetLinks = append(magnetLinks, magnetLink)
+			label := grupoNome + " " + strings.TrimSpace(arquivo.Find(".o-arquivo-info").Text())
+			audio = append(audio, findAudioFromText(label))
+		})
 	})
 
-	var audio []schema.Audio
-	var year string
-	var size []string
-	capa.Find(".post-description p").Each(func(i int, s *goquery.Selection) {
-		// pattern:
-		// Nome Original: 28 Weeks Later
-		// Lançamento: 2007
-		// Duração: 1h 40 min
-		// Gênero: Terror, Suspense, Ficção
-		// Formato: MKV
-		// Tamanho: 2.45 GB
-		// Qualidade de Video: 10
-		// Qualidade do Audio: 10
-		// Idioma: Português | Inglês
-		// Legenda: Português, Inglês, Espanhol
-		var text strings.Builder
-		s.Find("span").Each(func(i int, span *goquery.Selection) {
-			text.WriteString(span.Text())
-			text.WriteString(" ")
+	// fallback: magnets soltos, sem agrupamento
+	if len(magnetLinks) == 0 {
+		doc.Find("a[href^='magnet']").Each(func(_ int, s *goquery.Selection) {
+			magnetLink, _ := s.Attr("href")
+			magnetLinks = append(magnetLinks, magnetLink)
+			audio = append(audio, nil)
 		})
-		audio = append(audio, findAudioFromText(text.String())...)
-		y := findYearFromText(text.String(), title)
-		if y != "" {
-			year = y
-		}
-		size = append(size, findSizesFromText(text.String())...)
-	})
+	}
 
 	// TODO: find any link from imdb
 	imdbLink := ""
-
-	size = utils.StableUniq(size)
 
 	var chanIndexedTorrent = make(chan schema.IndexedTorrent)
 
@@ -201,7 +194,10 @@ func getTorrentStarckFilmes(ctx context.Context, i *Indexer, link, referer strin
 				}
 				trackers[i] = strings.TrimSpace(unescapedTracker)
 			}
-			magnetAudio := getAudioFromTitle(releaseTitle, audio)
+			magnetAudio := audio[it]
+			if len(magnetAudio) == 0 {
+				magnetAudio = getAudioFromTitle(releaseTitle, magnetAudio)
+			}
 
 			peer, seed, err := goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, trackers)
 			if err != nil {
@@ -210,11 +206,7 @@ func getTorrentStarckFilmes(ctx context.Context, i *Indexer, link, referer strin
 
 			title := processTitle(title, magnetAudio)
 
-			// if the number of sizes is equal to the number of magnets, then assign the size to each indexed torrent in order
 			var mySize string
-			if len(size) == len(magnetLinks) {
-				mySize = size[it]
-			}
 			if mySize == "" {
 				warmMagnetMetadata(ctx, i, magnetLink)
 			}

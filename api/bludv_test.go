@@ -488,7 +488,7 @@ func TestExtractBluDVMagnetLinksLeavesSeasonPackWithoutEpisode(t *testing.T) {
 func TestExtractBluDVMagnetLinksIgnoresUnrelatedAnchors(t *testing.T) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`
 <div class="post"><div class="content">
-<p><a href="https://bludvfilmes.xyz/series/">S&eacute;ries</a>
+<p><a href="https://bludvfilmes1.xyz/series/">S&eacute;ries</a>
 <a href="https://www.youtube.com/watch?v=abc">Trailer</a>
 <a href="magnet:?xt=urn:btih:aaa">Magnet-Link</a></p>
 </div></div>`))

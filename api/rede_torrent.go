@@ -21,8 +21,8 @@ import (
 
 var rede_torrent = IndexerMeta{
 	Label:       "rede_torrent",
-	URL:         utils.GetIndexerURLFromEnv("INDEXER_REDE_TORRENT_URL", "https://redetorrent.com/"),
-	SearchURL:   "index.php?s=",
+	URL:         utils.GetIndexerURLFromEnv("INDEXER_REDE_TORRENT_URL", "https://redestorrents.com/"),
+	SearchURL:   "index.php?busca=",
 	PagePattern: "%s",
 }
 
@@ -75,10 +75,16 @@ func (i *Indexer) HandlerRedeTorrentIndexer(w http.ResponseWriter, r *http.Reque
 	}
 
 	var links []string
-	doc.Find(".capa_lista").Each(func(i int, s *goquery.Selection) {
-		link, _ := s.Find("a").Attr("href")
-		links = append(links, link)
+	doc.Find("a[href*='-torrent-']").Each(func(i int, s *goquery.Selection) {
+		link, _ := s.Attr("href")
+		if link != "" {
+			links = append(links, link)
+		}
 	})
+	links = utils.StableUniq(links)
+	if len(links) == 0 {
+		logging.Debug().Str("url", url).Str("page_title", doc.Find("title").First().Text()).Msg("rede_torrent: 0 links na página de busca")
+	}
 
 	// if no links were indexed, expire the document in cache
 	if len(links) == 0 {
@@ -115,76 +121,46 @@ func getTorrentsRedeTorrent(ctx context.Context, i *Indexer, link, referer strin
 	}
 
 	article := doc.Find(".conteudo")
-	// title pattern: "Something - optional balbla (dddd) some shit" - extract "Something" and "dddd"
-	titleRe := regexp.MustCompile(`^(.*?)(?: - (.*?))? \((\d{4})\)`)
-	titleP := titleRe.FindStringSubmatch(article.Find("h1").Text())
+	if article.Length() == 0 {
+		// redestorrents.com (novo tema): o conteúdo vive no documento inteiro
+		article = doc.Selection
+	}
+	// title pattern: "Toy Story 5 Torrent (2026) Dual Áudio 5.1 Download" - extract "Something" and "dddd"
+	titleRe := regexp.MustCompile(`^(.*?)(?: Torrent)?(?: - (.*?))? \((\d{4})\)`)
+	titleP := titleRe.FindStringSubmatch(article.Find("h1").First().Text())
 	if len(titleP) < 3 {
 		return nil, fmt.Errorf("could not extract title from %s", link)
 	}
 	title := strings.TrimSpace(titleP[1])
 	year := strings.TrimSpace(titleP[3])
 
-	textContent := article.Find(".apenas_itemprop")
-	date := getPublishedDateFromMeta(doc)
-	magnets := textContent.Find("a[href^=\"magnet\"]")
+date := getPublishedDateFromMeta(doc)
+
+	// redestorrents.com: cada .download-row tem um rótulo (.download-name) e um magnet
 	var magnetLinks []string
-	magnets.Each(func(i int, s *goquery.Selection) {
-		magnetLink, _ := s.Attr("href")
-		magnetLinks = append(magnetLinks, magnetLink)
-	})
-
-	var audio []schema.Audio
+	var audio [][]schema.Audio
 	var size []string
-	article.Find("div#informacoes > p").Each(func(i int, s *goquery.Selection) {
-		// pattern:
-		// Filme Bicho de Sete Cabeças Torrent
-		// Título Original: Bicho de Sete Cabeças
-		// Lançamento: 2001
-		// Gêneros: Drama / Nacional
-		// Idioma: Português
-		// Qualidade: 720p / BluRay
-		// Duração: 1h 14 Minutos
-		// Formato: Mp4
-		// Vídeo: 10 e Áudio: 10
-		// Legendas: Português
-		// Nota do Imdb: 7.7
-		// Tamanho: 1.26 GB
-
-		// we need to manualy parse because the text is not well formatted
-		htmlContent, err := s.Html()
-		if err != nil {
-			logging.Error().
-				Str("url", link).
-				Err(err).Msg("Failed to get HTML content")
+	article.Find(".download-row").Each(func(i int, s *goquery.Selection) {
+		label := strings.TrimSpace(s.Find(".download-name").Text())
+		magnetLink, ok := s.Find("a[href^='magnet']").Attr("href")
+		if !ok {
 			return
 		}
-
-		// remove any \n and \t characters
-		htmlContent = strings.ReplaceAll(htmlContent, "\n", "")
-		htmlContent = strings.ReplaceAll(htmlContent, "\t", "")
-
-		// split by <br> tags and render each line
-		brRe := regexp.MustCompile(`<br\s*\/?>`)
-		htmlContent = brRe.ReplaceAllString(htmlContent, "<br>")
-		lines := strings.Split(htmlContent, "<br>")
-
-		var text strings.Builder
-		for _, line := range lines {
-			// remove any HTML tags
-			re := regexp.MustCompile(`<[^>]*>`)
-			line = re.ReplaceAllString(line, "")
-
-			line = strings.TrimSpace(line)
-			text.WriteString(line + "\n")
-		}
-
-		audio = append(audio, findAudioFromText(text.String())...)
-		y := findYearFromText(text.String(), title)
-		if y != "" {
-			year = y
-		}
-		size = append(size, findSizesFromText(text.String())...)
+		magnetLinks = append(magnetLinks, magnetLink)
+		audio = append(audio, findAudioFromText(label))
+		sizes := findSizesFromText(label)
+		size = append(size, strings.Join(sizes, ", "))
 	})
+
+	// fallback: magnets soltos na página, sem .download-row
+	if len(magnetLinks) == 0 {
+		article.Find("a[href^='magnet']").Each(func(i int, s *goquery.Selection) {
+			magnetLink, _ := s.Attr("href")
+			magnetLinks = append(magnetLinks, magnetLink)
+			audio = append(audio, nil)
+			size = append(size, "")
+		})
+	}
 
 	// find any link from imdb
 	imdbLink := ""
@@ -195,8 +171,6 @@ func getTorrentsRedeTorrent(ctx context.Context, i *Indexer, link, referer strin
 			imdbLink = _imdbLink
 		}
 	})
-
-	size = utils.StableUniq(size)
 
 	var chanIndexedTorrent = make(chan schema.IndexedTorrent)
 
@@ -211,7 +185,10 @@ func getTorrentsRedeTorrent(ctx context.Context, i *Indexer, link, referer strin
 			releaseTitle := magnet.DisplayName
 			infoHash := magnet.InfoHash.String()
 			trackers := magnet.Trackers
-			magnetAudio := getAudioFromTitle(releaseTitle, audio)
+			magnetAudio := audio[it]
+			if len(magnetAudio) == 0 {
+				magnetAudio = getAudioFromTitle(releaseTitle, magnetAudio)
+			}
 
 			peer, seed, err := goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, trackers)
 			if err != nil {
