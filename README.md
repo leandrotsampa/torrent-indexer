@@ -11,12 +11,12 @@ Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org
 
 ## Supported sites
 
-- [comando-torrents](https://comando.la/)
-- [bludv](https://bludv2.xyz/)
+- [comando-torrents](https://comando1.com/)
+- [bludv](https://bludvfilmes1.xyz/)
 - [torrent-dos-filmes](https://torrentdosfilmes-v2.xyz/)
-- [starck-filmes](https://www.starckfilmes-v20.com/)
-- [rede-torrent](https://redetorrent.com/)
-- [vaca-torrent](https://vaqueirofilmes.com/)
+- [starck-filmes](https://starckfilmes-v26.com/)
+- [rede-torrent](https://redestorrents.com/)
+- [vaca-torrent](https://vaqueirofilmes1.com/)
 - [erai-raws](https://www.erai-raws.info/)
 - [darkmahou](https://darkmahou.io/)
 
