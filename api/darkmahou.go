@@ -154,11 +154,16 @@ func buildDarkmahouURL(metadata IndexerMeta, q, page string) string {
 }
 
 // extractDarkmahouSearchLinks collects the anime page URLs from a search/listing
-// page. Results live in div.listupd as article.bs cards linking via a.tip.
+// page. Search results live in div.listupd as article.bs cards linking via
+// a.tip. The home/listing pages use dm-latest sections of article.dm-card
+// cards; the home stacks several of them (latest releases, new animes, movies,
+// recommendations) and only the first one — the latest releases — is indexed.
 func extractDarkmahouSearchLinks(doc *goquery.Document) []string {
 	var links []string
 	seen := map[string]bool{}
-	doc.Find("div.listupd article.bs a.tip").Each(func(_ int, s *goquery.Selection) {
+	cards := doc.Find("div.listupd article.bs a.tip").AddSelection(
+		doc.Find("section.dm-latest").First().Find(".dm-grid article.dm-card > a[href]"))
+	cards.Each(func(_ int, s *goquery.Selection) {
 		href, ok := s.Attr("href")
 		if !ok {
 			return
@@ -245,7 +250,15 @@ func resolveDarkmahouLink(href, key string) string {
 }
 
 var (
-	darkmahouEpisodeLabelRE = regexp.MustCompile(`(?i)epis[oó]dio\s*(\d+)`)
+	// darkmahouEpisodeLabelRE matches an episode heading ("Episódio 05") or an
+	// episode range ("Episódio 1000~1100").
+	darkmahouEpisodeLabelRE = regexp.MustCompile(`(?i)epis[oó]dio\s*(\d+)(?:\s*[~-]\s*(\d+))?`)
+	// darkmahouHostSuffixRE matches the counter the site appends to repeated
+	// link names in a row ("1080p-2", "1080p HEVC-3", "1080p HEVC-2 CR"). Only a
+	// counter after a letter is dropped, so episode ranges ("01-12") are kept.
+	darkmahouHostSuffixRE = regexp.MustCompile(`([[:alpha:]])-\d{1,2}\b`)
+	// darkmahouPremiereYearRE extracts the year of the premiere date ("Jan 16, 2026").
+	darkmahouPremiereYearRE = regexp.MustCompile(`\b(\d{4})\b`)
 	// darkmahouLabelNoiseRE drops filler words darkmahou puts in download
 	// headings that are not release info ("Torrent", "Download", "Baixar", ...).
 	darkmahouLabelNoiseRE = regexp.MustCompile(`(?i)\b(torrent|download|baixar|assistir|online)\b`)
@@ -255,7 +268,8 @@ var (
 	// darkmahouSeasonLabelRE matches a Portuguese season heading ("1ª Temporada",
 	// "2 Temporada Completa"), capturing the season number and whether it is a
 	// complete-season pack.
-	darkmahouSeasonLabelRE = regexp.MustCompile(`(?i)(\d+)\s*ª?\s*temporada(\s+(completa|completo))?`)
+	// "BD" may sit between them ("2ª Temporada BD Completa") and is kept.
+	darkmahouSeasonLabelRE = regexp.MustCompile(`(?i)(\d+)\s*ª?\s*temporada(?:\s+(bd))?(?:\s+(completa|completo))?`)
 	// darkmahouRangeRE matches a bracketed episode range ("[01-12]", "(01~12)").
 	darkmahouRangeRE = regexp.MustCompile(`[\[\(]\s*\d{1,4}\s*[-~]\s*\d{1,4}\s*[\]\)]`)
 )
@@ -288,9 +302,19 @@ func buildDarkmahouReleaseTitle(pageTitle, label string) string {
 
 	// Per-episode: "Episódio 05 720p" -> "<page> - 05 [720p]". Anime episodes use
 	// absolute numbering, which *arr parses well.
+	// An episode range ("Episódio 1000~1100") becomes "<page> - 1000 ~ 1100".
 	if m := darkmahouEpisodeLabelRE.FindStringSubmatch(label); len(m) > 1 {
-		quality := strings.TrimSpace(darkmahouEpisodeLabelRE.ReplaceAllString(label, ""))
-		title := fmt.Sprintf("%s - %s", pageTitle, m[1])
+		quality := strings.TrimSpace(darkmahouWhitespaceRE.ReplaceAllString(
+			darkmahouEpisodeLabelRE.ReplaceAllString(label, ""), " "))
+		// Some headings repeat the anime name ("One Piece Episódio 0001~1163").
+		if pageTitle != "" && strings.HasPrefix(strings.ToLower(quality), strings.ToLower(pageTitle)) {
+			quality = strings.TrimSpace(quality[len(pageTitle):])
+		}
+		episode := m[1]
+		if m[2] != "" {
+			episode = fmt.Sprintf("%s ~ %s", m[1], m[2])
+		}
+		title := fmt.Sprintf("%s - %s", pageTitle, episode)
 		if quality != "" {
 			title = fmt.Sprintf("%s [%s]", title, quality)
 		}
@@ -304,7 +328,11 @@ func buildDarkmahouReleaseTitle(pageTitle, label string) string {
 	if m := darkmahouSeasonLabelRE.FindStringSubmatch(label); len(m) > 1 {
 		season, _ := strconv.Atoi(m[1])
 		complete := m[3] != ""
-		label = darkmahouSeasonLabelRE.ReplaceAllString(label, fmt.Sprintf("S%02d", season))
+		replacement := fmt.Sprintf("S%02d", season)
+		if m[2] != "" {
+			replacement += " " + m[2]
+		}
+		label = strings.Replace(label, m[0], replacement, 1)
 		if complete {
 			label = darkmahouRangeRE.ReplaceAllString(label, "")
 		}
@@ -317,8 +345,19 @@ func buildDarkmahouReleaseTitle(pageTitle, label string) string {
 	return pageTitle
 }
 
-// extractDarkmahouMagnetLinks walks each download block (div.soraddl), using the
-// block heading as label and resolving every .slink anchor into a magnet link.
+// Selectors of the download area. Each one combines the current layout
+// (#dm-downloads details groups) with the previous one (div.soraddl tables).
+const (
+	darkmahouBlockSelector      = "div.soraddl, #dm-downloads details.dm-download-group"
+	darkmahouBlockLabelSelector = ".sorattl h3, summary .dm-download-title"
+	darkmahouRowSelector        = "tr, .dm-resolution"
+	darkmahouLinkSelector       = ".slink a, .dm-hosts a[href]"
+	darkmahouRowLabelSelector   = "td.reso .res, td.reso, .res, .dm-quality"
+)
+
+// extractDarkmahouMagnetLinks walks each download block (a details group in the
+// current layout, div.soraddl in the previous one), using the block heading as
+// label and resolving every host anchor into a magnet link.
 //
 // Inside a block the links are split by rows, each labelled by its own cell:
 // "Baixar>>" for the original audio and "Dublado>>" for the dub. That row label
@@ -329,11 +368,11 @@ func extractDarkmahouMagnetLinks(doc *goquery.Document, key string) []darkmahouM
 	var magnetLinks []darkmahouMagnetLink
 	seen := map[string]bool{}
 
-	doc.Find("div.soraddl").Each(func(_ int, block *goquery.Selection) {
-		blockLabel := strings.TrimSpace(block.Find(".sorattl h3").First().Text())
+	doc.Find(darkmahouBlockSelector).Each(func(_ int, block *goquery.Selection) {
+		blockLabel := strings.TrimSpace(block.Find(darkmahouBlockLabelSelector).First().Text())
 
 		collect := func(container *goquery.Selection, label string) {
-			container.Find(".slink a").Each(func(_ int, a *goquery.Selection) {
+			container.Find(darkmahouLinkSelector).Each(func(_ int, a *goquery.Selection) {
 				href, ok := a.Attr("href")
 				if !ok {
 					return
@@ -346,7 +385,7 @@ func extractDarkmahouMagnetLinks(doc *goquery.Document, key string) []darkmahouM
 				seen[resolved] = true
 
 				itemLabel := label
-				if text := strings.TrimSpace(a.Text()); text != "" {
+				if text := extractDarkmahouLinkText(a); text != "" {
 					itemLabel = strings.TrimSpace(fmt.Sprintf("%s %s", label, text))
 				}
 
@@ -354,7 +393,7 @@ func extractDarkmahouMagnetLinks(doc *goquery.Document, key string) []darkmahouM
 			})
 		}
 
-		block.Find("tr").Each(func(_ int, row *goquery.Selection) {
+		block.Find(darkmahouRowSelector).Each(func(_ int, row *goquery.Selection) {
 			collect(row, joinDarkmahouLabels(blockLabel, extractDarkmahouRowLabel(row)))
 		})
 
@@ -369,8 +408,48 @@ func extractDarkmahouMagnetLinks(doc *goquery.Document, key string) []darkmahouM
 const darkmahouRowLabelTrimSet = "> :-"
 
 // extractDarkmahouRowLabel reads the label of a download row ("Baixar", "Dublado").
+// The site joins words with dots ("Dublado.[Multi-Audio]>>", "Erai.01~100>>"),
+// which are turned into spaces.
 func extractDarkmahouRowLabel(row *goquery.Selection) string {
-	return strings.Trim(strings.TrimSpace(row.Find("td.reso .res, td.reso, .res").First().Text()), darkmahouRowLabelTrimSet)
+	label := strings.Trim(strings.TrimSpace(row.Find(darkmahouRowLabelSelector).First().Text()), darkmahouRowLabelTrimSet)
+	label = strings.ReplaceAll(label, ".", " ")
+	return strings.TrimSpace(darkmahouWhitespaceRE.ReplaceAllString(label, " "))
+}
+
+// extractDarkmahouLinkText reads the name of a host link ("1080p", "1080p HEVC").
+// In the current layout the name is the anchor's first <span>, followed by an
+// aria-hidden arrow and a screen-reader "(abre em nova aba)" note, which are
+// not part of it. The "-2" counter of repeated names is dropped.
+func extractDarkmahouLinkText(a *goquery.Selection) string {
+	text := a.Text()
+	if span := a.ChildrenFiltered("span:not([aria-hidden]):not(.screen-reader-text)").First(); span.Length() > 0 {
+		text = span.Text()
+	} else if a.ChildrenFiltered("span").Length() > 0 {
+		text = ""
+	}
+	text = darkmahouHostSuffixRE.ReplaceAllString(text, "$1")
+	return strings.TrimSpace(darkmahouWhitespaceRE.ReplaceAllString(text, " "))
+}
+
+// extractDarkmahouYear reads the premiere year from the facts list
+// ("<dt>Estreia</dt><dd>Jan 16, 2026</dd>"), falling back to the generic
+// "Lançamento:" / "(2026)" lookup.
+func extractDarkmahouYear(doc *goquery.Document, infoText, title string) string {
+	var year string
+	doc.Find("dt").EachWithBreak(func(_ int, dt *goquery.Selection) bool {
+		if !strings.EqualFold(strings.TrimSpace(dt.Text()), "Estreia") {
+			return true
+		}
+		if m := darkmahouPremiereYearRE.FindStringSubmatch(dt.NextFiltered("dd").Text()); len(m) > 1 {
+			year = m[1]
+		}
+		return false
+	})
+	if year != "" {
+		return year
+	}
+
+	return findYearFromText(infoText, title)
 }
 
 func joinDarkmahouLabels(labels ...string) string {
@@ -404,7 +483,7 @@ func getTorrentsDarkmahou(ctx context.Context, i *Indexer, link, referer string)
 		// title adds Portuguese in getAudioFromTitle).
 		audio = []schema.Audio{schema.AudioJapanese}
 	}
-	year := findYearFromText(infoText, title)
+	year := extractDarkmahouYear(doc, infoText, title)
 
 	magnetLinks := extractDarkmahouMagnetLinks(doc, key)
 	if len(magnetLinks) == 0 {

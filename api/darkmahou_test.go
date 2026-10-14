@@ -194,3 +194,161 @@ func TestExtractDarkmahouMagnetLinks(t *testing.T) {
 		t.Errorf("second link = %q, want decoded %q", links[1].URL, darkmahouTestMagnet)
 	}
 }
+
+// darkmahouNewLayoutHome mirrors the current home/listing layout: a slideshow
+// followed by several dm-latest sections, the first being "Últimos lançamentos".
+const darkmahouNewLayoutHome = `
+<section class="dm-slideshow"><article class="dm-slide"><a href="https://darkmahou.io/slide/">slide</a></article></section>
+<section class="dm-latest dm-home-section"><header class="dm-section-heading"><h2>Últimos lançamentos</h2> <a class="dm-section-note" href="https://darkmahou.io/?dm_catalog=ongoing">Ver mais</a></header>
+<div class="dm-grid">
+	<article class="dm-card"> <a href="https://darkmahou.io/shiotaiou-no-satou-san/"><div class="dm-poster"><img src="x.jpg" alt="Shiotaiou"> <span class="dm-episode">EP 2</span></div><h3>Shiotaiou</h3><p>Em lançamento</p> </a></article>
+	<article class="dm-card"> <a href="https://darkmahou.io/seitokai-ni-mo-ana-wa-aru/"><div class="dm-poster"></div><h3>Seitokai</h3></a></article>
+	<article class="dm-card"> <a href="https://darkmahou.io/shiotaiou-no-satou-san/"><h3>dup</h3></a></article>
+</div></section>
+<section class="dm-latest dm-home-section"><header class="dm-section-heading"><h2>Recomendações</h2></header>
+<div class="dm-grid"><article class="dm-card"> <a href="https://darkmahou.io/recomendado/"><h3>Rec</h3></a></article></div></section>`
+
+func TestExtractDarkmahouSearchLinksNewLayout(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(darkmahouNewLayoutHome))
+	if err != nil {
+		t.Fatalf("failed to parse fixture: %v", err)
+	}
+
+	got := extractDarkmahouSearchLinks(doc)
+	want := []string{"https://darkmahou.io/shiotaiou-no-satou-san/", "https://darkmahou.io/seitokai-ni-mo-ana-wa-aru/"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("got %v, want %v (only the latest-releases section)", got, want)
+	}
+}
+
+// darkmahouNewLayoutPost mirrors the current anime page: facts list with the
+// premiere date and the #dm-downloads area made of details groups, each with
+// .dm-resolution rows labelled by .dm-quality and direct magnet anchors.
+const darkmahouNewLayoutPost = `
+<h1 class="entry-title" itemprop="name">Sousou no Frieren 2ª Temporada</h1>
+<section class="dm-facts"><dl class="dm-facts-grid">
+	<div class="dm-fact dm-fact-status"><dt>Status</dt><dd>Concluído</dd></div>
+	<div class="dm-fact "><dt>Episódios</dt><dd>10</dd></div>
+	<div class="dm-fact "><dt>Estreia</dt><dd>Jan 16, 2026</dd></div>
+</dl></section>
+<section id="dm-downloads" aria-label="Downloads"><div class="dm-download-box"><div class="dm-download-list">
+<details class="dm-download-group">
+	<summary><span class="dm-download-icon" aria-hidden="true">↓</span><span class="dm-download-title">Episódio 01</span><span class="dm-detail-toggle" aria-hidden="true">⌄</span></summary>
+	<div class="dm-download-resolutions">
+		<div class="dm-resolution"><span class="dm-quality">Baixar&gt;&gt;</span><div class="dm-hosts">
+			<a href="magnet:?xt=urn:btih:2b429d6eb6538ffc5a5b873fc33ad06646ef46dd&#038;dn=%5BErai-raws%5D%20Sousou%20no%20Frieren%202nd%20Season%20-%2001%20%5B1080p%20CR%20WEB-DL%20AVC%20AAC%5D" target="_blank"><span>1080p-2</span><span aria-hidden="true">↗</span><span class="screen-reader-text"> (abre em nova aba)</span></a>
+			<a href="magnet:?xt=urn:btih:b7fab54ee37b0793e56d845bdee8320f500c58c6&#038;dn=Sousou%20no%20Frieren" target="_blank"><span>1080p HEVC-2 CR</span><span aria-hidden="true">↗</span><span class="screen-reader-text"> (abre em nova aba)</span></a>
+		</div></div>
+		<div class="dm-resolution"><span class="dm-quality">Dublado.[Multi-Audio]&gt;&gt;</span><div class="dm-hosts">
+			<a href="magnet:?xt=urn:btih:84f19ebc83be1c18fd3195a96d7ce84f21c6563a&#038;dn=Frieren" target="_blank"><span>1080p </span><span aria-hidden="true">↗</span><span class="screen-reader-text"> (abre em nova aba)</span></a>
+		</div></div>
+	</div>
+</details>
+<details class="dm-download-group">
+	<summary><span class="dm-download-icon" aria-hidden="true">↓</span><span class="dm-download-title">2ª Temporada BD Completa Dublado/Legendada Torrent [01-10]</span></summary>
+	<div class="dm-download-resolutions">
+		<div class="dm-resolution"><span class="dm-quality">Dublado&gt;&gt;</span><div class="dm-hosts">
+			<a href="magnet:?xt=urn:btih:1111111111111111111111111111111111111111&#038;dn=Frieren%20S2" target="_blank"><span>1080p</span><span aria-hidden="true">↗</span><span class="screen-reader-text"> (abre em nova aba)</span></a>
+		</div></div>
+	</div>
+</details>
+</div></div></section>`
+
+func TestExtractDarkmahouMagnetLinksNewLayout(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(darkmahouNewLayoutPost))
+	if err != nil {
+		t.Fatalf("failed to parse fixture: %v", err)
+	}
+
+	links := extractDarkmahouMagnetLinks(doc, extractDarkmahouKey(doc))
+	want := []darkmahouMagnetLink{
+		{
+			URL:   "magnet:?xt=urn:btih:2b429d6eb6538ffc5a5b873fc33ad06646ef46dd&dn=%5BErai-raws%5D%20Sousou%20no%20Frieren%202nd%20Season%20-%2001%20%5B1080p%20CR%20WEB-DL%20AVC%20AAC%5D",
+			Label: "Episódio 01 Baixar 1080p",
+		},
+		{
+			URL:   "magnet:?xt=urn:btih:b7fab54ee37b0793e56d845bdee8320f500c58c6&dn=Sousou%20no%20Frieren",
+			Label: "Episódio 01 Baixar 1080p HEVC CR",
+		},
+		{
+			URL:   "magnet:?xt=urn:btih:84f19ebc83be1c18fd3195a96d7ce84f21c6563a&dn=Frieren",
+			Label: "Episódio 01 Dublado [Multi-Audio] 1080p",
+		},
+		{
+			URL:   "magnet:?xt=urn:btih:1111111111111111111111111111111111111111&dn=Frieren%20S2",
+			Label: "2ª Temporada BD Completa Dublado/Legendada Torrent [01-10] Dublado 1080p",
+		},
+	}
+	if len(links) != len(want) {
+		t.Fatalf("got %d links, want %d: %+v", len(links), len(want), links)
+	}
+	for i := range want {
+		if links[i] != want[i] {
+			t.Errorf("link[%d] = %+v, want %+v", i, links[i], want[i])
+		}
+	}
+}
+
+func TestDarkmahouNewLayoutReleaseTitles(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(darkmahouNewLayoutPost))
+	if err != nil {
+		t.Fatalf("failed to parse fixture: %v", err)
+	}
+
+	title := strings.TrimSpace(doc.Find("h1.entry-title").First().Text())
+	links := extractDarkmahouMagnetLinks(doc, extractDarkmahouKey(doc))
+	if len(links) != 4 {
+		t.Fatalf("got %d links, want 4: %+v", len(links), links)
+	}
+
+	tests := []struct {
+		displayName string
+		link        darkmahouMagnetLink
+		want        string
+	}{
+		{"[Erai-raws] Sousou no Frieren 2nd Season - 01 [1080p CR WEB-DL AVC AAC]", links[0], "[Erai-raws] Sousou no Frieren 2nd Season - 01 [1080p CR WEB-DL AVC AAC]"},
+		{"Sousou no Frieren", links[1], "Sousou no Frieren 2ª Temporada - 01 [1080p HEVC CR]"},
+		{"Frieren", links[2], "Sousou no Frieren 2ª Temporada - 01 [Dublado [Multi-Audio] 1080p]"},
+		{"Frieren S2", links[3], "Sousou no Frieren 2ª Temporada S02 BD Dublado/Legendada Dublado 1080p"},
+	}
+	for _, tt := range tests {
+		if got := chooseDarkmahouReleaseTitle(tt.displayName, title, tt.link.Label); got != tt.want {
+			t.Errorf("title for %q = %q, want %q", tt.link.Label, got, tt.want)
+		}
+	}
+}
+
+func TestBuildDarkmahouReleaseTitleNewLabels(t *testing.T) {
+	tests := []struct {
+		name, page, label, want string
+	}{
+		{"BD complete season keeps BD and drops range", "Sousou no Frieren", "1ª Temporada BD Completo Dublado [Dual-Audio][Multi-Subs] Torrent 1080p", "Sousou no Frieren S01 BD Dublado [Dual-Audio][Multi-Subs] 1080p"},
+		{"episode range", "One Piece", "Episódio 1000~1100 OPEX Baixar 1080p", "One Piece - 1000 ~ 1100 [OPEX 1080p]"},
+		{"episode range repeating the page title", "One Piece", "One Piece Episódio 0001~1163 Baixar 720p", "One Piece - 0001 ~ 1163 [720p]"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildDarkmahouReleaseTitle(tt.page, tt.label); got != tt.want {
+				t.Errorf("buildDarkmahouReleaseTitle() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractDarkmahouYear(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(darkmahouNewLayoutPost))
+	if err != nil {
+		t.Fatalf("failed to parse fixture: %v", err)
+	}
+	if got := extractDarkmahouYear(doc, "", "Sousou no Frieren 2ª Temporada"); got != "2026" {
+		t.Errorf("extractDarkmahouYear() = %q, want %q", got, "2026")
+	}
+
+	empty, err := goquery.NewDocumentFromReader(strings.NewReader(`<h1>x</h1>`))
+	if err != nil {
+		t.Fatalf("failed to parse fixture: %v", err)
+	}
+	if got := extractDarkmahouYear(empty, "Lançamento: 2019", "x"); got != "2019" {
+		t.Errorf("extractDarkmahouYear() fallback = %q, want %q", got, "2019")
+	}
+}
