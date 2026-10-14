@@ -39,6 +39,7 @@ var commonWebsiteSLDs = []string{
 	"comandotorrents",
 	"comandohds",
 	"redetorrent",
+	"redestorrents",
 	"torrenting",
 	"baixarfilmesdubladosviatorrent",
 	"hidratorrents",
