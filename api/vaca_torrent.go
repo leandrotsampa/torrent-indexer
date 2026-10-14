@@ -25,9 +25,11 @@ import (
 )
 
 var vacaTorrent = IndexerMeta{
-	Label:       "vaca_torrent",
-	URL:         utils.GetIndexerURLFromEnv("INDEXER_VACA_TORRENT_URL", "https://vaqueirofilmes.com/pt/"),
-	SearchURL:   "?s=",
+	Label: "vaca_torrent",
+	URL:   utils.GetIndexerURLFromEnv("INDEXER_VACA_TORRENT_URL", "https://vaqueirofilmes1.com/pt/"),
+	// Search results are loaded via WordPress admin-ajax (action=filtrar_busca);
+	// the endpoint lives at the root of the host of URL.
+	SearchURL:   "/wp-admin/admin-ajax.php",
 	PagePattern: "page/%s/",
 }
 
@@ -49,10 +51,23 @@ func (i *Indexer) HandlerVacaTorrentIndexer(w http.ResponseWriter, r *http.Reque
 		page = "1"
 	}
 
-	targetURL := buildVacaTorrentURL(metadata, q, page)
-
-	logging.InfoWithRequest(r).Str("target_url", targetURL).Msg("Processing indexer request")
-	resp, err := i.requester.GetDocument(ctx, targetURL)
+	var (
+		links     []string
+		targetURL string
+		err       error
+	)
+	if q == "" {
+		targetURL = buildVacaTorrentURL(metadata, page)
+		logging.InfoWithRequest(r).Str("target_url", targetURL).Msg("Processing indexer request")
+		links, err = getVacaTorrentListingLinks(ctx, i, targetURL)
+	} else {
+		var form url.Values
+		targetURL, form, err = buildVacaTorrentSearchRequest(metadata, q, page)
+		if err == nil {
+			logging.InfoWithRequest(r).Str("target_url", targetURL).Str("query", q).Msg("Processing indexer request")
+			links, err = getVacaTorrentSearchLinks(ctx, i, targetURL, form, page, metadata.URL)
+		}
+	}
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		err = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -62,58 +77,15 @@ func (i *Indexer) HandlerVacaTorrentIndexer(w http.ResponseWriter, r *http.Reque
 		i.metrics.IndexerErrors.WithLabelValues(metadata.Label).Inc()
 		return
 	}
-	defer resp.Close()
 
-	doc, err := goquery.NewDocumentFromReader(resp)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		err = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		if err != nil {
-			logging.ErrorWithRequest(r).Err(err).Msg("Failed to encode error response")
-		}
-		i.metrics.IndexerErrors.WithLabelValues(metadata.Label).Inc()
-		return
-	}
-
-	var links []string
-
-	// For home page: find article links in .grid-home
-	selector := ".i-tem_ht"
-	doc.Find(selector).Each(func(_ int, s *goquery.Selection) {
-		link, exists := s.Find("a").Attr("href")
-		if exists {
-			links = append(links, link)
-		}
-	})
-	if len(links) == 0 {
-		doc.Find("a[href], link[href]").Each(func(_ int, s *goquery.Selection) {
-			link, exists := s.Attr("href")
-			if exists && (strings.Contains(link, "/pt/movie/") || strings.Contains(link, "/pt/tv-shows/")) {
-				links = append(links, link)
-			}
-		})
-	}
-	links = utils.StableUniq(links)
-
-	// if no links were indexed, expire the document in cache
-	if len(links) == 0 {
-		_ = i.requester.ExpireDocument(ctx, targetURL)
-	}
-
-	soraFetcher, err := utils.NewSoraLinkFetcher("https://vacadb.org", i.redis)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		err = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		if err != nil {
-			logging.ErrorWithRequest(r).Err(err).Msg("Failed to encode error response")
-		}
-		i.metrics.IndexerErrors.WithLabelValues(metadata.Label).Inc()
-		return
+	referer := metadata.URL
+	if q == "" {
+		referer = targetURL
 	}
 
 	// extract each torrent link
 	indexedTorrents := utils.ParallelFlatMap(links, func(link string) ([]schema.IndexedTorrent, error) {
-		return getTorrentsVacaTorrent(ctx, i, link, targetURL, soraFetcher)
+		return getTorrentsVacaTorrent(ctx, i, link, referer)
 	})
 
 	// Apply post-processors
@@ -133,21 +105,161 @@ func (i *Indexer) HandlerVacaTorrentIndexer(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func buildVacaTorrentURL(metadata IndexerMeta, query, page string) string {
+// buildVacaTorrentURL builds the listing (home/page N) URL.
+func buildVacaTorrentURL(metadata IndexerMeta, page string) string {
+	if page == "" || page == "1" {
+		return metadata.URL
+	}
+	return fmt.Sprintf("%s%s", metadata.URL, fmt.Sprintf(metadata.PagePattern, page))
+}
+
+// buildVacaTorrentSearchRequest builds the admin-ajax search request. The
+// classic `?s=` page renders an empty shell and loads results through
+// admin-ajax (action=filtrar_busca), whose endpoint is at the root of the host
+// of metadata.URL (so an INDEXER_VACA_TORRENT_URL override is respected).
+func buildVacaTorrentSearchRequest(metadata IndexerMeta, query, page string) (string, url.Values, error) {
 	if page == "" {
 		page = "1"
 	}
+	base, err := url.Parse(metadata.URL)
+	if err != nil || base.Scheme == "" || base.Host == "" {
+		return "", nil, fmt.Errorf("invalid VacaTorrent URL %q", metadata.URL)
+	}
+	searchPath := metadata.SearchURL
+	if searchPath == "" {
+		searchPath = vacaTorrent.SearchURL
+	}
+	ajaxURL := (&url.URL{Scheme: base.Scheme, Host: base.Host, Path: searchPath}).String()
 
-	baseURL := metadata.URL
-	if page != "1" {
-		baseURL = fmt.Sprintf("%s%s", baseURL, fmt.Sprintf(metadata.PagePattern, page))
+	form := url.Values{}
+	form.Set("action", "filtrar_busca")
+	form.Set("s", query)
+	form.Set("tipo", "todos")
+	form.Set("paged", page)
+	form.Set("lang", "pt-BR")
+	return ajaxURL, form, nil
+}
+
+type vacaTorrentSearchResponse struct {
+	HTML  string `json:"html"`
+	Total int    `json:"total"`
+	Pages int    `json:"pages"`
+}
+
+// parseVacaTorrentSearchResponse extracts post links from the admin-ajax
+// search JSON. Pages past the last one reported by the endpoint yield nothing
+// (the endpoint otherwise keeps returning results for out-of-range pages).
+func parseVacaTorrentSearchResponse(body []byte, page string) ([]string, error) {
+	var resp vacaTorrentSearchResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("invalid VacaTorrent search response: %w", err)
+	}
+	if pageNum, err := strconv.Atoi(page); err == nil && pageNum > 1 && pageNum > resp.Pages {
+		return nil, nil
+	}
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(resp.HTML))
+	if err != nil {
+		return nil, fmt.Errorf("invalid VacaTorrent search HTML: %w", err)
+	}
+	return extractVacaTorrentLinks(doc), nil
+}
+
+// extractVacaTorrentLinks returns the post links from a listing/search
+// document: the `.i-tem_ht` cards, or, if there are none, any anchor that
+// points to a movie/tv-show post (never category or pagination pages).
+func extractVacaTorrentLinks(doc *goquery.Document) []string {
+	var links []string
+	doc.Find(".i-tem_ht").Each(func(_ int, s *goquery.Selection) {
+		if link, exists := s.Find("a[href]").Attr("href"); exists && link != "" {
+			links = append(links, link)
+		}
+	})
+	if len(links) == 0 {
+		doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) {
+			if link, exists := s.Attr("href"); exists && isVacaTorrentPostURL(link) {
+				links = append(links, link)
+			}
+		})
+	}
+	return utils.StableUniq(links)
+}
+
+// isVacaTorrentPostURL reports whether link is a single post, i.e.
+// /pt/movie/<slug>/ or /pt/tv-shows/<slug>/ (not the category root, its
+// pagination or a feed).
+func isVacaTorrentPostURL(link string) bool {
+	u, err := url.Parse(link)
+	if err != nil {
+		return false
+	}
+	segments := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(segments) != 3 || segments[0] != "pt" {
+		return false
+	}
+	if segments[1] != "movie" && segments[1] != "tv-shows" {
+		return false
+	}
+	return segments[2] != "" && segments[2] != "page" && segments[2] != "feed"
+}
+
+func getVacaTorrentListingLinks(ctx context.Context, i *Indexer, targetURL string) ([]string, error) {
+	resp, err := i.requester.GetDocument(ctx, targetURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Close()
+
+	doc, err := goquery.NewDocumentFromReader(resp)
+	if err != nil {
+		return nil, err
 	}
 
-	if query == "" {
-		return baseURL
+	links := extractVacaTorrentLinks(doc)
+	// if no links were indexed, expire the document in cache
+	if len(links) == 0 {
+		_ = i.requester.ExpireDocument(ctx, targetURL)
 	}
+	return links, nil
+}
 
-	return fmt.Sprintf("%s%s%s", baseURL, metadata.SearchURL, url.QueryEscape(query))
+func getVacaTorrentSearchLinks(ctx context.Context, i *Indexer, ajaxURL string, form url.Values, page, referer string) ([]string, error) {
+	body, err := i.requester.PostForm(ctx, ajaxURL, form, referer)
+	if err != nil {
+		return nil, err
+	}
+	links, err := parseVacaTorrentSearchResponse(body, page)
+	if err != nil || len(links) == 0 {
+		// don't keep an unexpected/empty answer in the short-lived cache
+		_ = i.requester.ExpirePostForm(ctx, ajaxURL, form)
+	}
+	return links, err
+}
+
+// cleanVacaMagnetTrackers drops `tr` parameters that are not URLs (the
+// resolver chain emits e.g. "udptracker.openbittorrent.com80announce", with
+// the "://", ":" and "/" stripped). The rest of the magnet is kept verbatim.
+func cleanVacaMagnetTrackers(magnetLink string) string {
+	prefix, query, found := strings.Cut(magnetLink, "?")
+	if !found {
+		return magnetLink
+	}
+	params := strings.Split(query, "&")
+	kept := params[:0]
+	changed := false
+	for _, param := range params {
+		if value, isTracker := strings.CutPrefix(param, "tr="); isTracker {
+			decoded, err := url.QueryUnescape(value)
+			if err != nil || !strings.Contains(decoded, "://") {
+				changed = true
+				continue
+			}
+		}
+		kept = append(kept, param)
+	}
+	if !changed {
+		return magnetLink
+	}
+	return prefix + "?" + strings.Join(kept, "&")
 }
 
 var commentRegex = regexp.MustCompile(`<!--(.*?)-->`)
@@ -191,22 +303,34 @@ func getVacaTorrentLinkedMagnets(ctx context.Context, i *Indexer, doc *goquery.D
 			magnetLinks = append(magnetLinks, magnetLink)
 		})
 		magnetLinks = append(magnetLinks, getVacaDataLinkMagnets(linkedDoc)...)
-		linkedDoc.Find("a[href*=\"systemtech.space/enc/go.php\"]").Each(func(_ int, s *goquery.Selection) {
-			href, exists := s.Attr("href")
-			if !exists || href == "" {
-				return
-			}
-			href = resolveVacaHref(href, linkPage)
-			resolvedMagnets, err := getVacaSystemTechMagnets(ctx, i, href, linkPage)
-			if err != nil {
-				logging.Warn().Err(err).Str("href", href).Msg("Failed to resolve VacaTorrent SystemTech link")
-				return
-			}
-			magnetLinks = append(magnetLinks, resolvedMagnets...)
-		})
+		magnetLinks = append(magnetLinks, getVacaSystemTechDocMagnets(ctx, i, linkedDoc, linkPage)...)
 	}
 
+	// legacy posts (root-level slugs, still returned by the search) carry the
+	// SystemTech links directly in the post page
+	magnetLinks = append(magnetLinks, getVacaSystemTechDocMagnets(ctx, i, doc, referer)...)
+
 	return utils.StableUniq(magnetLinks)
+}
+
+func getVacaSystemTechDocMagnets(ctx context.Context, i *Indexer, doc *goquery.Document, pageURL string) []string {
+	var hrefs []string
+	doc.Find("a[href*=\"systemtech.space/enc/go.php\"]").Each(func(_ int, s *goquery.Selection) {
+		if href, exists := s.Attr("href"); exists && href != "" {
+			hrefs = append(hrefs, resolveVacaHref(href, pageURL))
+		}
+	})
+
+	var magnetLinks []string
+	for _, href := range utils.StableUniq(hrefs) {
+		resolvedMagnets, err := getVacaSystemTechMagnets(ctx, i, href, pageURL)
+		if err != nil {
+			logging.Warn().Err(err).Str("href", href).Msg("Failed to resolve VacaTorrent SystemTech link")
+			continue
+		}
+		magnetLinks = append(magnetLinks, resolvedMagnets...)
+	}
+	return magnetLinks
 }
 
 func getVacaSystemTechMagnets(ctx context.Context, i *Indexer, link, referer string) ([]string, error) {
@@ -446,7 +570,7 @@ func cacheVacaMagnets(ctx context.Context, i *Indexer, cacheKey string, magnetLi
 	}
 }
 
-func getTorrentsVacaTorrent(ctx context.Context, i *Indexer, link, referer string, soraFetcher *utils.SoraLinkFetcher) ([]schema.IndexedTorrent, error) {
+func getTorrentsVacaTorrent(ctx context.Context, i *Indexer, link, referer string) ([]schema.IndexedTorrent, error) {
 	var indexedTorrents []schema.IndexedTorrent
 	doc, err := getDocument(ctx, i, link, referer)
 	if err != nil {
@@ -527,24 +651,6 @@ func getTorrentsVacaTorrent(ctx context.Context, i *Indexer, link, referer strin
 		magnetLinks = append(magnetLinks, magnetLink)
 	})
 
-	doc.Find(".area-links-download a").Each(func(_ int, s *goquery.Selection) {
-		// check for vacadb.org
-		href, exists := s.Attr("href")
-		if exists && strings.Contains(href, "vacadb.org") {
-			// extract the first query param value
-			u, err := url.Parse(href)
-			if err == nil {
-				queryID := u.Query().Get("id")
-				if queryID != "" {
-					magnetLink, err := soraFetcher.FetchLink(ctx, queryID)
-					if err == nil && magnetLink != "" {
-						magnetLinks = append(magnetLinks, magnetLink)
-					}
-				}
-			}
-		}
-	})
-
 	// get the comment content inside streaming-container, parse it as HTML and extract magnet links from there
 	doc.Find(".streaming-container").Each(func(_ int, s *goquery.Selection) {
 		html, err := s.Html()
@@ -570,6 +676,9 @@ func getTorrentsVacaTorrent(ctx context.Context, i *Indexer, link, referer strin
 	})
 
 	magnetLinks = append(magnetLinks, getVacaTorrentLinkedMagnets(ctx, i, doc, link)...)
+	for idx, magnetLink := range magnetLinks {
+		magnetLinks[idx] = cleanVacaMagnetTrackers(magnetLink)
+	}
 	magnetLinks = utils.StableUniq(magnetLinks)
 	size = utils.StableUniq(size)
 
