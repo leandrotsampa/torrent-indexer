@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,7 +21,7 @@ import (
 
 var starck_filmes = IndexerMeta{
 	Label:       "starck_filmes",
-	URL:         utils.GetIndexerURLFromEnv("INDEXER_STARCK_FILMES_URL", "https://starckfilmes-v26.com/"),
+	URL:         utils.GetIndexerURLFromEnv("INDEXER_STARCK_FILMES_URL", "https://starckfilmes-v27.com/"),
 	SearchURL:   "?s=",
 	PagePattern: "page/%s",
 }
@@ -79,10 +80,19 @@ func (i *Indexer) HandlerStarckFilmesIndexer(w http.ResponseWriter, r *http.Requ
 	}
 
 	var links []string
+	// legacy layout (starckfilmes-vNN.com): .item > div.sub-item > a
 	doc.Find(".item").Each(func(i int, s *goquery.Selection) {
-		link, _ := s.Find("div.sub-item > a").Attr("href")
-		links = append(links, link)
+		if link, _ := s.Find("div.sub-item > a").Attr("href"); link != "" {
+			links = append(links, link)
+		}
 	})
+	// new layout (starckfilmesnet.com): a.o-card
+	doc.Find("a.o-card").Each(func(i int, s *goquery.Selection) {
+		if link, _ := s.Attr("href"); link != "" {
+			links = append(links, link)
+		}
+	})
+	links = utils.StableUniq(links)
 
 	// if no links were indexed, expire the document in cache
 	if len(links) == 0 {
@@ -120,19 +130,108 @@ func getTorrentStarckFilmes(ctx context.Context, i *Indexer, link, referer strin
 	}
 
 	date := getPublishedDateFromRawString(link)
+	if date.IsZero() {
+		date = getPublishedDateFromMeta(doc)
+	}
 
+	var title, year string
+	var magnets []starckMagnet
+	if doc.Find("section.o-lista").Length() > 0 {
+		title, year, magnets = parseStarckFilmesListPost(doc)
+	} else {
+		title, year, magnets = parseStarckFilmesLegacyPost(doc)
+	}
+
+	// TODO: find any link from imdb
+	imdbLink := ""
+
+	var chanIndexedTorrent = make(chan schema.IndexedTorrent)
+
+	// for each magnet link, create a new indexed torrent
+	for _, m := range magnets {
+		go func(m starckMagnet) {
+			magnetLink := m.link
+			magnet, err := magnet.ParseMagnetUri(magnetLink)
+			if err != nil {
+				logging.Error().Err(err).Str("magnet_link", magnetLink).Msg("Failed to parse magnet URI")
+			}
+			releaseTitle := strings.TrimSpace(magnet.DisplayName)
+			// url decode the title
+			releaseTitle, err = url.QueryUnescape(releaseTitle)
+			if err != nil {
+				logging.Error().Err(err).Str("title", releaseTitle).Msg("Failed to URL decode title")
+				releaseTitle = strings.TrimSpace(magnet.DisplayName)
+			}
+			infoHash := magnet.InfoHash.String()
+			trackers := magnet.Trackers
+			for i, tracker := range trackers {
+				unescapedTracker, err := url.QueryUnescape(tracker)
+				if err != nil {
+					logging.Error().Err(err).Str("tracker", tracker).Msg("Failed to URL decode tracker")
+				}
+				trackers[i] = strings.TrimSpace(unescapedTracker)
+			}
+			magnetAudio := getAudioFromTitle(releaseTitle, m.audio)
+
+			peer, seed, err := goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, trackers)
+			if err != nil {
+				logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
+			}
+
+			title := processTitle(title, magnetAudio)
+
+			mySize := m.size
+			if mySize == "" {
+				warmMagnetMetadata(ctx, i, magnetLink)
+			}
+
+			ixt := schema.IndexedTorrent{
+				Title:         releaseTitle,
+				OriginalTitle: title,
+				Details:       link,
+				Year:          year,
+				IMDB:          imdbLink,
+				Audio:         magnetAudio,
+				MagnetLink:    magnetLink,
+				Date:          date,
+				InfoHash:      infoHash,
+				Trackers:      trackers,
+				LeechCount:    peer,
+				SeedCount:     seed,
+				Size:          mySize,
+			}
+			chanIndexedTorrent <- ixt
+		}(m)
+	}
+
+	for i := 0; i < len(magnets); i++ {
+		it := <-chanIndexedTorrent
+		indexedTorrents = append(indexedTorrents, it)
+	}
+
+	return indexedTorrents, nil
+}
+
+type starckMagnet struct {
+	link  string
+	size  string
+	audio []schema.Audio
+}
+
+// parseStarckFilmesLegacyPost parses the legacy layout (starckfilmes-vNN.com):
+// title and details in .post .capa, magnets (plain or data-u encoded) in
+// .post-buttons.
+func parseStarckFilmesLegacyPost(doc *goquery.Document) (title, year string, magnets []starckMagnet) {
 	post := doc.Find(".post")
 	capa := post.Find(".capa")
-	title := capa.Find(".post-description > h2").Text()
+	title = capa.Find(".post-description > h2").Text()
 	post_buttons := post.Find(".post-buttons")
-	magnets := post_buttons.Find("a[href^=\"magnet\"]")
 	var magnetLinks []string
-	magnets.Each(func(i int, s *goquery.Selection) {
+	post_buttons.Find("a[href^=\"magnet\"]").Each(func(i int, s *goquery.Selection) {
 		magnetLink, _ := s.Attr("href")
 		magnetLinks = append(magnetLinks, magnetLink)
 	})
-	dataUs := post_buttons.Find("a[data-u]")
-	dataUs.Each(func(i int, s *goquery.Selection) {
+	post_buttons.Find("a[data-u]").Each(func(i int, s *goquery.Selection) {
 		dataU, _ := s.Attr("data-u")
 		magnetLink, err := utils.DecodeStarckDataU(dataU)
 		if err != nil {
@@ -143,7 +242,6 @@ func getTorrentStarckFilmes(ctx context.Context, i *Indexer, link, referer strin
 	})
 
 	var audio []schema.Audio
-	var year string
 	var size []string
 	capa.Find(".post-description p").Each(func(i int, s *goquery.Selection) {
 		// pattern:
@@ -169,79 +267,59 @@ func getTorrentStarckFilmes(ctx context.Context, i *Indexer, link, referer strin
 		}
 		size = append(size, findSizesFromText(text.String())...)
 	})
-
-	// TODO: find any link from imdb
-	imdbLink := ""
-
 	size = utils.StableUniq(size)
 
-	var chanIndexedTorrent = make(chan schema.IndexedTorrent)
-
-	// for each magnet link, create a new indexed torrent
 	for it, magnetLink := range magnetLinks {
-		it := it
-		go func(it int, magnetLink string) {
-			magnet, err := magnet.ParseMagnetUri(magnetLink)
-			if err != nil {
-				logging.Error().Err(err).Str("magnet_link", magnetLink).Msg("Failed to parse magnet URI")
-			}
-			releaseTitle := strings.TrimSpace(magnet.DisplayName)
-			// url decode the title
-			releaseTitle, err = url.QueryUnescape(releaseTitle)
-			if err != nil {
-				logging.Error().Err(err).Str("title", releaseTitle).Msg("Failed to URL decode title")
-				releaseTitle = strings.TrimSpace(magnet.DisplayName)
-			}
-			infoHash := magnet.InfoHash.String()
-			trackers := magnet.Trackers
-			for i, tracker := range trackers {
-				unescapedTracker, err := url.QueryUnescape(tracker)
-				if err != nil {
-					logging.Error().Err(err).Str("tracker", tracker).Msg("Failed to URL decode tracker")
-				}
-				trackers[i] = strings.TrimSpace(unescapedTracker)
-			}
-			magnetAudio := getAudioFromTitle(releaseTitle, audio)
+		m := starckMagnet{link: magnetLink, audio: audio}
+		// if the number of sizes is equal to the number of magnets, then assign the size to each magnet in order
+		if len(size) == len(magnetLinks) {
+			m.size = size[it]
+		}
+		magnets = append(magnets, m)
+	}
+	return title, year, magnets
+}
 
-			peer, seed, err := goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, trackers)
-			if err != nil {
-				logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
-			}
+var starckTitleRE = regexp.MustCompile(`^(.*?)(?:\s+Torrent)?\s*\((\d{4})\)`)
 
-			title := processTitle(title, magnetAudio)
-
-			// if the number of sizes is equal to the number of magnets, then assign the size to each indexed torrent in order
-			var mySize string
-			if len(size) == len(magnetLinks) {
-				mySize = size[it]
-			}
-			if mySize == "" {
-				warmMagnetMetadata(ctx, i, magnetLink)
-			}
-
-			ixt := schema.IndexedTorrent{
-				Title:         releaseTitle,
-				OriginalTitle: title,
-				Details:       link,
-				Year:          year,
-				IMDB:          imdbLink,
-				Audio:         magnetAudio,
-				MagnetLink:    magnetLink,
-				Date:          date,
-				InfoHash:      infoHash,
-				Trackers:      trackers,
-				LeechCount:    peer,
-				SeedCount:     seed,
-				Size:          mySize,
-			}
-			chanIndexedTorrent <- ixt
-		}(it, magnetLink)
+// parseStarckFilmesListPost parses the new layout (starckfilmesnet.com):
+// h1.o-titulo "Título (ano)" and the downloads grouped by audio in
+// section.o-lista (header .o-grupo-nome, one div.o-arquivo per file with its
+// size in .o-arquivo-info > b).
+func parseStarckFilmesListPost(doc *goquery.Document) (title, year string, magnets []starckMagnet) {
+	h1 := strings.TrimSpace(doc.Find("h1").First().Text())
+	title = h1
+	if match := starckTitleRE.FindStringSubmatch(h1); match != nil {
+		title = strings.TrimSpace(match[1])
+		year = match[2]
 	}
 
-	for i := 0; i < len(magnetLinks); i++ {
-		it := <-chanIndexedTorrent
-		indexedTorrents = append(indexedTorrents, it)
-	}
+	doc.Find("section.o-lista").Each(func(_ int, group *goquery.Selection) {
+		audio := starckGroupAudio(group.Find(".o-grupo-nome").First().Text())
+		group.Find(".o-arquivo").Each(func(_ int, file *goquery.Selection) {
+			magnetLink, _ := file.Find("a.o-baixar[href^=\"magnet\"]").Attr("href")
+			if magnetLink == "" {
+				return
+			}
+			magnets = append(magnets, starckMagnet{
+				link:  magnetLink,
+				size:  strings.TrimSpace(file.Find(".o-arquivo-info b").First().Text()),
+				audio: audio,
+			})
+		})
+	})
+	return title, year, magnets
+}
 
-	return indexedTorrents, nil
+// starckGroupAudio maps an o-lista group name ("DUAL ÁUDIO", "DUBLADO",
+// "NACIONAL", "LEGENDADO") to the audio it implies; subtitled groups carry
+// only the original audio, which the page does not name.
+func starckGroupAudio(name string) []schema.Audio {
+	name = strings.ToLower(name)
+	for _, token := range []string{"dual", "dublad", "nacional"} {
+		if strings.Contains(name, token) {
+			return []schema.Audio{schema.AudioPortuguese}
+		}
+	}
+	return nil
 }

@@ -19,6 +19,9 @@ import (
 
 const (
 	cacheKey = "shortLivedCache"
+	// maxPlainRetries is how many extra attempts the plain client gets on a
+	// retryable status before falling back to FlareSolverr
+	maxPlainRetries = 2
 )
 
 // Markers of a real Cloudflare interstitial/challenge. Note: "challenge-platform"
@@ -81,7 +84,27 @@ func (i *Requster) GetDocument(ctx context.Context, url string, referer ...strin
 	// Add browser-like headers to spoof a real browser
 	spoofBrowserHeaders(req, ref)
 
-	resp, err := i.httpClient.Do(req)
+	// some CDNs (e.g. Cloudflare on redestorrents.com) intermittently answer
+	// 403/429/5xx to the same client; a new attempt usually goes through
+	var resp *http.Response
+	for attempt := 0; ; attempt++ {
+		resp, err = i.httpClient.Do(req)
+		if err != nil || !isRetryableStatus(resp.StatusCode) || attempt == maxPlainRetries {
+			break
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * time.Second):
+		}
+		req, err = http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request for url %s: %w", url, err)
+		}
+		spoofBrowserHeaders(req, ref)
+	}
 	if err != nil {
 		// try request with flare solverr
 		body, err = i.fs.Get(ctx, url, 3)
@@ -113,7 +136,8 @@ func (i *Requster) GetDocument(ctx context.Context, url string, referer ...strin
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 	bodyByte = buf.Bytes()
-	if hasChallange(bodyByte) {
+	// also fall back on a still-blocked answer (e.g. a 403 without challenge markers)
+	if hasChallange(bodyByte) || (resp != nil && isRetryableStatus(resp.StatusCode)) {
 		// try request with flare solverr
 		body, err = i.fs.Get(ctx, url, 3)
 		if err != nil {
@@ -215,6 +239,13 @@ func (i *Requster) ExpireDocument(ctx context.Context, url string) error {
 }
 
 // hasChallange checks if the body contains a challange by regex matching
+// isRetryableStatus reports whether status is a transient block/failure worth
+// retrying (or handing to FlareSolverr): 403, 429 and 5xx. Other 4xx (e.g. a
+// legit 404) are final.
+func isRetryableStatus(status int) bool {
+	return status == http.StatusForbidden || status == http.StatusTooManyRequests || status >= 500
+}
+
 func hasChallange(body []byte) bool {
 	return challangeRegex.Match(body)
 }

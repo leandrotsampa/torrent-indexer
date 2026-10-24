@@ -14,7 +14,7 @@ Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org
 - [comando-torrents](https://comando1.com/)
 - [bludv](https://bludvfilmes1.xyz/)
 - [torrent-dos-filmes](https://torrentdosfilmes-v2.xyz/)
-- [starck-filmes](https://starckfilmes-v26.com/)
+- [starck-filmes](https://starckfilmes-v27.com/) (also supports the [starckfilmesnet.com](https://starckfilmesnet.com/) layout via `INDEXER_STARCK_FILMES_URL`)
 - [rede-torrent](https://redestorrents.com/)
 - [vaca-torrent](https://vaqueirofilmes1.com/)
 - [erai-raws](https://www.erai-raws.info/)
@@ -45,6 +45,7 @@ You can configure the server using the following environment variables:
 - `FLARESOLVERR_ADDRESS`: (optional) The address of the FlareSolverr instance, including scheme and port, e.g. `http://192.168.6.10:8191`. If only a host/IP is provided, port `8191` and `http://` are assumed. Default: `N/A`
 - `FLARESOLVERR_TIMEOUT_SECONDS`: (optional) Timeout for flaresolverr requests. Default: `30`
 - `FLARESOLVERR_POOL_SIZE`: (optional) Number of FlareSolverr sessions in the pool. Default: `5`
+- `SPOOFED_USER_AGENT`: (optional) Overrides the browser User-Agent sent by the plain HTTP client. Default: a recent desktop Chrome UA
 - `REQUEST_TIMEOUT_MILLISECONDS`: (optional) Timeout for external scraping requests. Default: `5000`
 - `MEILISEARCH_ADDRESS`: (optional) The address of the MeiliSearch instance. Default: `N/A`
 - `MEILISEARCH_KEY`: (optional) The API key of the MeiliSearch instance. Default: `N/A`
