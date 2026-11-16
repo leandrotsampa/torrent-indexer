@@ -199,3 +199,40 @@ func TestDecodeStarckDataU(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeStarckXID(t *testing.T) {
+	const magnet = "magnet:?xt=urn:btih:098e2653b690f4f6269671b82f3f93124d27811b&dn=Padroes.de.Morte.2026.1080p"
+	tests := []struct {
+		name    string
+		xid     string
+		want    string
+		wantErr bool
+	}{
+		{
+			// base64(magnet) shuffled with step 3, as served by filmedl.com/?xid=
+			name: "padded payload",
+			xid:  "buBWPmFVNnBGbhYmZ2VHM0JjOvYjZ59XN4MjducDZx1GY1UjcugmTy4WZ69jYyNndmRGOpUTauMDMxojMwAjOyRTNkhiMl4jMxcjM4YDM1gTMwF2ciIAJ2=mO=RT",
+			want: magnet,
+		},
+		{name: "empty", xid: "", wantErr: true},
+		{name: "not base64", xid: "%%%%", wantErr: true},
+		{name: "not a magnet", xid: "aGVsbG8gd29ybGQ", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := utils.DecodeStarckXID(tt.xid)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("DecodeStarckXID() = %q, want error", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("DecodeStarckXID() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("DecodeStarckXID() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

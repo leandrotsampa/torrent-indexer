@@ -21,7 +21,7 @@ import (
 
 var starck_filmes = IndexerMeta{
 	Label:       "starck_filmes",
-	URL:         utils.GetIndexerURLFromEnv("INDEXER_STARCK_FILMES_URL", "https://starckfilmes-v27.com/"),
+	URL:         utils.GetIndexerURLFromEnv("INDEXER_STARCK_FILMES_URL", "https://starckfilmes-v30.com/"),
 	SearchURL:   "?s=",
 	PagePattern: "page/%s",
 }
@@ -219,8 +219,8 @@ type starckMagnet struct {
 }
 
 // parseStarckFilmesLegacyPost parses the legacy layout (starckfilmes-vNN.com):
-// title and details in .post .capa, magnets (plain or data-u encoded) in
-// .post-buttons.
+// title and details in .post .capa, magnets (plain, data-u encoded or behind
+// the filmedl.com ?xid= gateway) in .post-buttons.
 func parseStarckFilmesLegacyPost(doc *goquery.Document) (title, year string, magnets []starckMagnet) {
 	post := doc.Find(".post")
 	capa := post.Find(".capa")
@@ -236,6 +236,21 @@ func parseStarckFilmesLegacyPost(doc *goquery.Document) (title, year string, mag
 		magnetLink, err := utils.DecodeStarckDataU(dataU)
 		if err != nil {
 			logging.Warn().Err(err).Str("data_u", dataU).Msg("Failed to decode data-u attribute, skipping")
+			return
+		}
+		magnetLinks = append(magnetLinks, magnetLink)
+	})
+	post_buttons.Find("a[href*=\"xid=\"]").Each(func(i int, s *goquery.Selection) {
+		href, _ := s.Attr("href")
+		parsed, err := url.Parse(href)
+		if err != nil {
+			return
+		}
+		// Query() decodes a literal "+" (valid base64) as a space; undo it
+		xid := strings.ReplaceAll(parsed.Query().Get("xid"), " ", "+")
+		magnetLink, err := utils.DecodeStarckXID(xid)
+		if err != nil {
+			logging.Warn().Err(err).Str("href", href).Msg("Failed to decode xid gateway link, skipping")
 			return
 		}
 		magnetLinks = append(magnetLinks, magnetLink)

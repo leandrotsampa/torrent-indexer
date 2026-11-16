@@ -97,6 +97,26 @@ func Test_parseStarckFilmesLegacyPost(t *testing.T) {
 	}
 }
 
+func Test_parseStarckFilmesLegacyPost_FilmedlGateway(t *testing.T) {
+	// since 2026-11 the download button points to filmedl.com/?xid=<payload>,
+	// an ad gateway whose payload is the base64 magnet shuffled with step 3
+	doc := newStarckTestDoc(t, `<html><body><div class="post">
+<div class="capa"><div class="post-description"><h2>Padrões de Morte</h2></div></div>
+<div class="post-buttons">
+  <a href="https://filmedl.com/?xid=buBWPmFVNnBGbhYmZ2VHM0JjOvYjZ59XN4MjducDZx1GY1UjcugmTy4WZ69jYyNndmRGOpUTauMDMxojMwAjOyRTNkhiMl4jMxcjM4YDM1gTMwF2ciIAJ2=mO=RT" title="Baixar">Baixar</a>
+  <a href="https://filmedl.com/?xid=aGVsbG8gd29ybGQ" title="Baixar">Baixar</a>
+</div>
+</div></body></html>`)
+
+	_, _, magnets := parseStarckFilmesLegacyPost(doc)
+	if len(magnets) != 1 {
+		t.Fatalf("len(magnets) = %d, want 1: %+v", len(magnets), magnets)
+	}
+	if !strings.HasPrefix(magnets[0].link, "magnet:?xt=urn:btih:098e2653") {
+		t.Errorf("link = %q", magnets[0].link)
+	}
+}
+
 func Test_starckGroupAudio(t *testing.T) {
 	for name, wantPT := range map[string]bool{
 		"DUAL ÁUDIO": true,

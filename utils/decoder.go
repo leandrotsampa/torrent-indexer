@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"strings"
 )
 
 // DarkmahouAdKey is the default KEY_STRING embedded in darkmahou.io's link
@@ -98,6 +99,39 @@ func DecodeStarckDataU(dataU string) (string, error) {
 	}
 
 	return unshuffled, nil
+}
+
+// DecodeStarckXID decodes the magnet link hidden in the "xid" query param of
+// the filmedl.com ad gateway used by starck-filmes: the base64-encoded magnet
+// (padded or not, standard or URL-safe alphabet) shuffled with step 3, the
+// same scheme as the legacy data-u attribute.
+func DecodeStarckXID(xid string) (string, error) {
+	if xid == "" {
+		return "", fmt.Errorf("empty xid value")
+	}
+
+	unshuffled, err := unshuffleStringByStep(xid, 3)
+	if err != nil {
+		return "", fmt.Errorf("unshuffle failed: %w", err)
+	}
+
+	trimmed := strings.TrimRight(unshuffled, "=")
+	var decoded []byte
+	for _, enc := range []*base64.Encoding{base64.RawStdEncoding, base64.RawURLEncoding} {
+		if decoded, err = enc.DecodeString(trimmed); err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return "", fmt.Errorf("base64 decode failed: %w", err)
+	}
+
+	magnetLink := html.UnescapeString(string(decoded))
+	if !IsMagnetLink(magnetLink) {
+		return "", fmt.Errorf("decoded xid is not a magnet link")
+	}
+
+	return magnetLink, nil
 }
 
 func IsMagnetLink(link string) bool {
