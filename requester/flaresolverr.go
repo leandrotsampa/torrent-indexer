@@ -25,7 +25,16 @@ type FlareSolverr struct {
 	sessionPool chan string
 	mu          sync.Mutex
 	initiated   bool
+
+	// initMu guards initiated/lastInitAttempt: when FlareSolverr is not up yet
+	// at startup (e.g. docker compose starting both at once), Get retries the
+	// initialization instead of staying disabled for the process lifetime.
+	initMu          sync.Mutex
+	lastInitAttempt time.Time
 }
+
+// initRetryInterval throttles initialization retries while FlareSolverr is down.
+const initRetryInterval = 10 * time.Second
 
 var (
 	ErrListSessions = fmt.Errorf("failed to list sessions")
@@ -48,12 +57,40 @@ func NewFlareSolverr(url string, timeoutMilli int, poolSize int) *FlareSolverr {
 		sessionPool: sessionPool,
 	}
 
-	err := f.FillSessionPool()
-	if err == nil {
-		f.initiated = true
+	if url != "" {
+		f.lastInitAttempt = time.Now()
+		if err := f.FillSessionPool(); err == nil {
+			f.initiated = true
+		}
 	}
 
 	return f
+}
+
+// ensureInitiated reports whether FlareSolverr is usable, retrying a failed
+// startup initialization at most once per initRetryInterval.
+func (f *FlareSolverr) ensureInitiated() bool {
+	if f.url == "" {
+		return false
+	}
+
+	f.initMu.Lock()
+	defer f.initMu.Unlock()
+
+	if f.initiated {
+		return true
+	}
+	if !f.lastInitAttempt.IsZero() && time.Since(f.lastInitAttempt) < initRetryInterval {
+		return false
+	}
+	f.lastInitAttempt = time.Now()
+
+	if err := f.FillSessionPool(); err != nil {
+		return false
+	}
+	f.initiated = true
+	logging.Info().Msg("FlareSolverr initialized")
+	return true
 }
 
 func normalizeFlareSolverrURL(address string) string {
@@ -108,7 +145,9 @@ func (f *FlareSolverr) FillSessionPool() error {
 
 	// If fewer than poolSize sessions were found, create new ones to fill the pool
 	for len(f.sessionPool) < cap(f.sessionPool) {
-		f.CreateSession()
+		if f.CreateSession() == "" {
+			return fmt.Errorf("failed to create FlareSolverr session")
+		}
 	}
 
 	return nil
@@ -236,7 +275,7 @@ type Response struct {
 
 func (f *FlareSolverr) Get(ctx context.Context, _url string, attempts int) (io.ReadCloser, error) {
 	// Check if the FlareSolverr instance was initiated
-	if !f.initiated {
+	if !f.ensureInitiated() {
 		return io.NopCloser(bytes.NewReader([]byte(""))), nil
 	}
 
