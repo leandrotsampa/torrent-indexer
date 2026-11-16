@@ -12,7 +12,7 @@ Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org
 ## Supported sites
 
 - [comando-torrents](https://comando1.com/)
-- [bludv](https://bludvfilmes1.xyz/)
+- [bludv](https://bludvfilmes2.xyz/) (posts whose only links are the `/gate/go/` ad gate are skipped)
 - [torrent-dos-filmes](https://torrentdosfilmes-v2.xyz/)
 - [starck-filmes](https://starckfilmes-v27.com/) (also supports the [starckfilmesnet.com](https://starckfilmesnet.com/) layout via `INDEXER_STARCK_FILMES_URL`)
 - [rede-torrent](https://redestorrents.com/)
