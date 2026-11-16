@@ -1,0 +1,15 @@
+{
+  "name": "legendado",
+  "includeCustomFormatWhenRenaming": false,
+  "specifications": [
+    {
+      "name": "legendado tag",
+      "implementation": "ReleaseTitleSpecification",
+      "negate": false,
+      "required": true,
+      "fields": {
+        "value": "\\(([^()]*, )?legendado\\)"
+      }
+    }
+  ]
+}

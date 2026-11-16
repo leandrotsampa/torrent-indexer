@@ -133,7 +133,8 @@ ends with the audio languages torrent-indexer detected, in parentheses, plus
 
 Portuguese audio always wins: a post announcing both "Dublado" and "Legendado"
 gets only `(brazilian)`. Sonarr/Radarr ignore these words when parsing, so they
-are safe to keep, and a custom format can match them.
+are safe to keep, and a custom format can match them — see
+[`integrations/custom-formats/legendado.json`](integrations/custom-formats/legendado.json).
 
 ## Integrating with Jackett
 
@@ -225,103 +226,14 @@ Sonarr/Radarr (a YML definition cannot — see
 3. **Api Path**: `/api` (the default; the suffix is accepted) or clear it
 4. Leave the API key empty, **Test** and save.
 
-Alternatively, you can integrate through a custom YML definition — without the
-language attributes. See [Adding a custom YML definition](https://wiki.servarr.com/prowlarr/indexers#adding-a-custom-yml-definition).
+Alternatively, ready-made YML definitions — one per indexer, without the language
+attributes — and Sonarr/Radarr custom formats live in
+[`integrations/`](integrations/), together with the full setup guide (URLs for every
+indexer, where to copy the files, which path to choose).
 
-```yaml
----
-id: torrent-indexer
-name: Torrent Indexer
-description: "Indexing Brazilian Torrent websites into structured data. github.com/leandrotsampa/torrent-indexer"
-language: pt-BR
-type: public
-encoding: UTF-8
-links:
-  - http://localhost:8080/
-
-caps:
-  categorymappings:
-    - { id: Movies, cat: Movies, desc: "Movies", default: true }
-    - { id: TV, cat: TV, desc: "TV", default: true }
-
-  modes:
-    search: [q]
-    tv-search: [q, season, ep]
-    movie-search: [q]
-  allowrawsearch: true
-
-settings:
-  - name: indexer
-    type: select
-    label: Indexer
-    default: bludv
-    options:
-      search: Torrent-Indexer Cache
-      bludv: BLUDV
-      comando_torrents: Comando Torrents
-      torrent-dos-filmes: Torrent dos Filmes
-      starck-filmes: Starck Filmes
-      rede_torrent: Rede Torrent
-      vaca_torrent: Vaca Torrent
-      erai_raws: Erai-raws
-      darkmahou: Darkmahou
-
-search:
-  paths:
-    - path: "{{ if eq .Config.indexer \"search\" }}search{{ else }}indexers/{{ .Config.indexer }}{{ end }}"
-      response:
-        type: json
-  inputs:
-    filter_results: "true"
-    q: "{{ .Keywords }}"
-  keywordsfilters:
-    - name: tolower
-    - name: re_replace
-      args: ["(?i)\\b(and|es|y|et)\\b", "e"]
-    - name: re_replace
-      args: ["(?i)\\bs0*(\\d{1,3})[\\s._-]*e0*(\\d{1,3})\\b", "temporada $1"]
-    - name: re_replace
-      args: ["(?i)\\bs0*(\\d{1,3})$", "temporada $1"]
-
-  rows:
-    selector: $.results
-    count:
-      selector: $.count
-
-  fields:
-    _id:
-      selector: info_hash
-    download:
-      selector: magnet_link
-    title:
-      selector: original_title
-    description:
-      selector: original_title
-    details:
-      selector: details
-    infohash:
-      selector: info_hash
-    date:
-      selector: date
-    size:
-      selector: size
-    seeders:
-      selector: seed_count
-    leechers:
-      selector: leech_count
-    imdb:
-      selector: imdb
-    category_is_tv_show:
-      selector: title
-      filters:
-        - name: regexp
-          args: "\\b(S\\d+(?:E\\d+)?)\\b"
-    category:
-      text: "{{ if .Result.category_is_tv_show }}TV{{ else }}Movies{{ end }}"
-```
-
-In Prowlarr, set `Base Url` to your running torrent-indexer instance, for example `http://192.168.6.10:7006/`.
-Do not add a `flaresolverr` tag unless you intentionally configured a Prowlarr Indexer Proxy with the same tag; torrent-indexer uses `FLARESOLVERR_ADDRESS` in its own container environment.
+Do not add a `flaresolverr` tag unless you intentionally configured a Prowlarr
+Indexer Proxy with the same tag; torrent-indexer uses `FLARESOLVERR_ADDRESS` in its
+own container environment.
 
 
 ## Mirrors

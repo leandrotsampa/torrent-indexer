@@ -1,0 +1,83 @@
+---
+id: torrent-indexer-torrent-dos-filmes
+name: Torrent dos Filmes (torrent-indexer)
+description: "Torrent dos Filmes — filmes e séries via torrent, servido pelo torrent-indexer"
+language: pt-BR
+type: public
+encoding: UTF-8
+links:
+  - http://torrent-indexer:7006/
+
+caps:
+  categorymappings:
+    - { id: Movies, cat: Movies, desc: "Movies", default: true }
+    - { id: TV, cat: TV, desc: "TV", default: true }
+
+  modes:
+    search: [q]
+    tv-search: [q, season, ep]
+    movie-search: [q]
+  allowrawsearch: true
+
+settings: []
+
+search:
+  paths:
+    - path: "indexers/torrent-dos-filmes"
+      response:
+        type: json
+  inputs:
+    filter_results: "true"
+    q: "{{ .Keywords }}"
+  keywordsfilters:
+    - name: tolower
+    - name: re_replace
+      args: ["(?i)\\b(and|es|y|et)\\b", "e"]
+    - name: re_replace
+      args: ["(?i)\\bs0*(\\d{1,3})[\\s._-]*e0*(\\d{1,3})\\b", "temporada $1"]
+    - name: re_replace
+      args: ["(?i)\\bs0*(\\d{1,3})$", "temporada $1"]
+
+  rows:
+    selector: $.results
+    count:
+      selector: $.count
+
+  fields:
+    _id:
+      selector: info_hash
+    download:
+      selector: magnet_link
+    title:
+      selector: title
+      filters:
+        - name: append
+          args: " [torrent-indexer]"
+    description:
+      selector: original_title
+    details:
+      selector: details
+    infohash:
+      selector: info_hash
+    date:
+      selector: date
+    size:
+      selector: size
+    seeders:
+      selector: seed_count
+    leechers:
+      selector: leech_count
+    imdbid:
+      selector: imdb
+      optional: true
+      filters:
+        - name: regexp
+          args: "(tt\\d+)"
+    category_is_tv_show:
+      selector: title
+      filters:
+        - name: regexp
+          args: "\\b(S\\d+(?:E\\d+)?)\\b"
+    category:
+      text: "{{ if .Result.category_is_tv_show }}TV{{ else }}Movies{{ end }}"
+# json engine n/a
