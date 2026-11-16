@@ -19,6 +19,7 @@ Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org
 - [vaca-torrent](https://vaqueirofilmes.com/)
 - [erai-raws](https://www.erai-raws.info/) (requires an Erai-raws account token — see `ERAI_RAWS_AUTH_TOKEN`)
 - [darkmahou](https://darkmahou.io/) (episodes behind the `otakufilmes.org` video-ad gate are skipped)
+- [nyaa](https://nyaa.si/) (anime; falls back to the [nyaa.wiki](https://nyaa.wiki/) mirror; audio and subtitle languages are read from each release page; raws are skipped)
 
 ## Deploy
 
@@ -67,6 +68,8 @@ You can configure the server using the following environment variables:
 - `INDEXER_<NAME>_URL`: (optional) Set a custom URL for the indexer. Where the "NAME" will be always uppercase indexer key with underscores. ex: `INDEXER_DODO_FILMES_URL=https://my-proxied-dodo-url.org`
     - `comando_torrents` supports both `INDEXER_COMANDO_TORRENTS_URL` and the legacy `INDEXER_COMANDO_URL`.
     - `erai_raws` defaults to `https://www.erai-raws.info/` and supports `INDEXER_ERAI_RAWS_URL`.
+    - `nyaa` defaults to `https://nyaa.si/` and supports `INDEXER_NYAA_URL`.
+- `INDEXER_NYAA_MIRRORS`: (optional) Comma-separated Nyaa mirrors tried, in order, when `INDEXER_NYAA_URL` fails. They must serve nyaa.si's search page layout (nyaa.wiki does; `nyaa.mom` redirects to it). `nyaa.iss.ink` uses the same layout but its search was down when this was written. Default: `https://nyaa.wiki/`
 - `INDEXER_BLUDV_APPEND_TRACKERS`: (optional) Append a short, stable tracker list to BLUDV magnet links while preserving the original `xt` first. Useful for Transmission setups that do not resolve hash-only magnets reliably. Default: `false`.
 - `INDEXER_ERAI_RAWS_RSS_URL`: (optional, recommended) Full authenticated Erai-raws RSS URL. Use this if your Erai-raws account provides a personal RSS/token URL.
 - `ERAI_RAWS_AUTH_TOKEN`: Authentication token for Erai-raws feeds, sent as `?token=`. Required by `erai_raws` (unless `INDEXER_ERAI_RAWS_RSS_URL` already carries it): the feed answers `403 Invalid or missing authentication token` without one.
@@ -109,7 +112,8 @@ The feed reuses the very same search path as `/indexers/<name>` — cache,
 post-processors and the `audio`, `year`, `imdb`, `page`, `sortBy` and
 `sortDirection` filters all keep working from the Torznab URL. It also replicates
 the `keywordsfilters` of the YML definitions (`and|es|y|et → e`, `SxxEyy →
-temporada N`, and dropping the season markers for the anime indexers), which
+temporada N`, and dropping the season markers for the anime indexers — except
+`nyaa`, which lists one release per episode and gets `SxxEyy` instead), which
 Prowlarr does not apply to a Generic Torznab indexer.
 
 Subtitle tracks are deliberately left out of the attributes: Sonarr/Radarr have no
@@ -135,6 +139,12 @@ Portuguese audio always wins: a post announcing both "Dublado" and "Legendado"
 gets only `(brazilian)`. Sonarr/Radarr ignore these words when parsing, so they
 are safe to keep, and a custom format can match them — see
 [`integrations/custom-formats/legendado.json`](integrations/custom-formats/legendado.json).
+
+`nyaa` reads the audio and subtitle tracks from the release page instead (each
+uploader writes them its own way, see `api/nyaa_languages.go`), so there
+`legendado` means **Portuguese subtitles** — a release subtitled only in English
+is not tagged — and "Dual Audio", which on Nyaa is Japanese + English, never
+counts as Portuguese.
 
 ## Integrating with Jackett
 

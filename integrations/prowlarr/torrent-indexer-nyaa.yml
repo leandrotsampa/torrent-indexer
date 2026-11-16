@@ -1,0 +1,73 @@
+---
+id: torrent-indexer-nyaa
+name: Nyaa (torrent-indexer)
+description: "Nyaa — animes via torrent, com áudio e legendas lidos da página do release, servido pelo torrent-indexer"
+language: pt-BR
+type: public
+encoding: UTF-8
+links:
+  - http://torrent-indexer:7006/
+
+caps:
+  categorymappings:
+    - { id: Anime, cat: "TV/Anime", desc: "Anime", default: true }
+    - { id: Movies, cat: Movies, desc: "Movies", default: true }
+
+  modes:
+    search: [q]
+    tv-search: [q, season, ep]
+    movie-search: [q]
+  allowrawsearch: true
+
+settings: []
+
+search:
+  paths:
+    - path: "indexers/nyaa"
+      response:
+        type: json
+  inputs:
+    filter_results: "true"
+    q: "{{ .Keywords }}"
+  # O Nyaa tem um release por episódio: o "S01E05" que o Prowlarr manda é
+  # mantido (ao contrário do erai/darkmahou) para achar o episódio certo.
+  keywordsfilters:
+    - name: trim
+
+  rows:
+    selector: $.results
+    count:
+      selector: $.count
+
+  fields:
+    _id:
+      selector: info_hash
+    download:
+      selector: magnet_link
+    title:
+      selector: title
+      filters:
+        - name: append
+          args: " [torrent-indexer]"
+    description:
+      selector: original_title
+    details:
+      selector: details
+    infohash:
+      selector: info_hash
+    date:
+      selector: date
+    size:
+      selector: size
+    seeders:
+      selector: seed_count
+    leechers:
+      selector: leech_count
+    category_is_movie:
+      selector: title
+      filters:
+        - name: regexp
+          args: "(?i)\\b(BDRip Completo|Movie|Filme|1080p BD)\\b"
+    category:
+      text: "{{ if .Result.category_is_movie }}Movies{{ else }}Anime{{ end }}"
+# json engine n/a

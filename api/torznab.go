@@ -69,6 +69,10 @@ type torznabIndexer struct {
 	// Anime indexers publish under TV/Anime and index whole animes per page, so
 	// they take the query without season/episode markers.
 	Anime bool
+	// EpisodeReleases marks an anime indexer that lists one release per
+	// episode (nyaa): a season+episode search asks for "SxxEyy" instead of
+	// dropping it, or it would only return the newest releases of the anime.
+	EpisodeReleases bool
 }
 
 // torznabIndexers lists the indexers reachable over Torznab, keyed by the path
@@ -124,6 +128,15 @@ func (i *Indexer) torznabIndexers() map[string]torznabIndexer {
 			Description: "Erai-raws — animes via torrent, servido pelo torrent-indexer",
 			Handler:     i.HandlerEraiRawsIndexer,
 			Anime:       true,
+		},
+		"nyaa": {
+			ID:          "nyaa",
+			Name:        "Nyaa (torrent-indexer)",
+			Description: "Nyaa — animes via torrent, com áudio e legendas lidos da página do release, servido pelo torrent-indexer",
+			Handler:     i.HandlerNyaaIndexer,
+			Anime:       true,
+			// one release per episode, unlike the per-anime pages of darkmahou
+			EpisodeReleases: true,
 		},
 	}
 }
@@ -306,7 +319,15 @@ func torznabKeywords(def torznabIndexer, q, season, ep string) string {
 	if def.Anime {
 		// The anime pages carry every episode, so the markers would only narrow
 		// the search wrongly; Sonarr picks the right episode from the title.
-		return normalizeSpaces(torznabSeasonMarkersRE.ReplaceAllString(q, " "))
+		keywords := normalizeSpaces(torznabSeasonMarkersRE.ReplaceAllString(q, " "))
+		if def.EpisodeReleases && season != "" && ep != "" {
+			s, sErr := strconv.Atoi(season)
+			e, eErr := strconv.Atoi(ep)
+			if sErr == nil && eErr == nil {
+				keywords = fmt.Sprintf("%s S%02dE%02d", keywords, s, e)
+			}
+		}
+		return keywords
 	}
 
 	keywords := strings.ToLower(strings.TrimSpace(q))

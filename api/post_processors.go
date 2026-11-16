@@ -28,6 +28,10 @@ func AppendAudioTags(_ *Indexer, _ *http.Request, torrents []schema.IndexedTorre
 		if it.Title == "" {
 			continue
 		}
+		if it.LanguagesFromSource {
+			torrents[i].Title = appendReleaseTags(it.Title, it.Audio, isSubtitledFromSource(it.Audio, it.Subtitles))
+			continue
+		}
 		// Reprocess audio tags in case any middleware has changed the title, adding
 		// to what the indexer already knew instead of replacing it: a middleware
 		// may have swapped the title for the torrent name (see

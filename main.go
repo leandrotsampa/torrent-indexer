@@ -101,6 +101,7 @@ func main() {
 	indexerMux.HandleFunc("/indexers/torrent-dos-filmes", indexers.HandlerTorrentDosFilmesIndexer)
 	indexerMux.HandleFunc("/indexers/vaca_torrent", indexers.HandlerVacaTorrentIndexer)
 	indexerMux.HandleFunc("/indexers/erai_raws", indexers.HandlerEraiRawsIndexer)
+	indexerMux.HandleFunc("/indexers/nyaa", indexers.HandlerNyaaIndexer)
 	indexerMux.HandleFunc("/indexers/darkmahou", indexers.HandlerDarkmahouIndexer)
 	indexerMux.HandleFunc("/indexers/manual", indexers.HandlerManualIndexer)
 	// Torznab feeds: same searches, rendered in the protocol Sonarr/Radarr and

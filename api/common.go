@@ -442,16 +442,33 @@ func appendReleaseTags(title string, a []schema.Audio, subtitled bool) string {
 // never when it carries Portuguese audio; otherwise when the audio is known
 // (so it is the original one) or a name says "Legendado"/"LEG".
 func isSubtitledRelease(audio []schema.Audio, names ...string) bool {
-	for _, a := range audio {
-		if a.LanguageName() == schema.Audio(schema.AudioPortuguese).LanguageName() {
-			return false
-		}
+	if hasPortugueseAudio(audio) {
+		return false
 	}
 	if len(audio) > 0 {
 		return true
 	}
 	for _, name := range names {
 		if subtitledMarkerRE.MatchString(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSubtitledFromSource is isSubtitledRelease for languages read from the
+// release page: subtitled means Portuguese subtitles without Portuguese audio,
+// so a release subtitled only in English is not tagged.
+func isSubtitledFromSource(audio, subtitles []schema.Audio) bool {
+	return !hasPortugueseAudio(audio) && hasPortugueseAudio(subtitles)
+}
+
+// hasPortugueseAudio reports whether the list carries Portuguese, under any of
+// its synonyms.
+func hasPortugueseAudio(list []schema.Audio) bool {
+	portuguese := schema.Audio(schema.AudioPortuguese).LanguageName()
+	for _, a := range list {
+		if a.LanguageName() == portuguese {
 			return true
 		}
 	}

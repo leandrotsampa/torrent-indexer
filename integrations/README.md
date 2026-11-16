@@ -41,6 +41,7 @@ port published by your compose file.
    | Vaca Torrent | `http://torrent-indexer:7006/torznab/vaca_torrent` |
    | Darkmahou (anime) | `http://torrent-indexer:7006/torznab/darkmahou` |
    | Erai-raws (anime) | `http://torrent-indexer:7006/torznab/erai_raws` |
+   | Nyaa (anime) | `http://torrent-indexer:7006/torznab/nyaa` |
 
 3. **Api Path**: keep the default `/api` (the suffix is accepted) or clear it.
 4. **Api Key**: empty. The categories come from `t=caps`.
@@ -87,6 +88,7 @@ column of the interactive search.
 | `torrent-indexer-vaca-torrent.yml` | Vaca Torrent | Movies, TV |
 | `torrent-indexer-darkmahou.yml` | Darkmahou | TV/Anime, Movies |
 | `torrent-indexer-erai-raws.yml` | Erai-raws | TV/Anime, Movies |
+| `torrent-indexer-nyaa.yml` | Nyaa | TV/Anime, Movies |
 
 The release title is the API `title` field — the same one the Torznab feed uses —
 followed by ` [torrent-indexer]`. A definition's `id` is how Prowlarr ties a
@@ -96,7 +98,8 @@ configured indexer to its file, so keep the ids when editing these files.
 
 Every release title ends with the audio languages torrent-indexer detected, and
 with `legendado` when the release has no Portuguese audio (see
-[Release title tags](../README.md#release-title-tags)):
+[Release title tags](../README.md#release-title-tags); for Nyaa, `legendado`
+means Portuguese subtitles, read from the release page):
 
 ```
 Superman 2025 1080p WEB-DL DUAL (brazilian, eng)
@@ -124,6 +127,8 @@ Brazilian sites name things:
   and `S01E02`/`S01 → temporada 1`.
 - **Anime sites** (darkmahou, erai_raws): the season/episode markers are dropped,
   so the search runs on the anime name and Sonarr picks the episode by title.
+- **Nyaa**: one release per episode, so a season+episode search asks for
+  `SxxEyy` (absolute numbers such as `One Piece 1100` pass through untouched).
 
 ## Notes
 

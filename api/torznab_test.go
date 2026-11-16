@@ -177,6 +177,7 @@ func TestTorznabCategories(t *testing.T) {
 func TestTorznabKeywordsMirrorsCardigannFilters(t *testing.T) {
 	movies := torznabIndexer{ID: "bludv"}
 	anime := torznabIndexer{ID: "darkmahou", Anime: true}
+	animeEpisodes := torznabIndexer{ID: "nyaa", Anime: true, EpisodeReleases: true}
 
 	tests := []struct {
 		name   string
@@ -194,6 +195,10 @@ func TestTorznabKeywordsMirrorsCardigannFilters(t *testing.T) {
 		{name: "movie query untouched", def: movies, q: "Superman", want: "superman"},
 		{name: "anime drops the markers", def: anime, q: "Sakamoto Days S01E13", want: "Sakamoto Days"},
 		{name: "anime drops temporada", def: anime, q: "Sakamoto Days temporada 2", want: "Sakamoto Days"},
+		{name: "episode releases keep the episode", def: animeEpisodes, q: "Ranma 1/2", season: "3", ep: "5", want: "Ranma 1/2 S03E05"},
+		{name: "episode releases rebuild a raw marker", def: animeEpisodes, q: "Ranma 1/2 s3e5", season: "3", ep: "5", want: "Ranma 1/2 S03E05"},
+		{name: "episode releases without episode", def: animeEpisodes, q: "Ranma 1/2 S03", season: "3", want: "Ranma 1/2"},
+		{name: "episode releases absolute number", def: animeEpisodes, q: "One Piece 1100", want: "One Piece 1100"},
 	}
 
 	for _, tt := range tests {
