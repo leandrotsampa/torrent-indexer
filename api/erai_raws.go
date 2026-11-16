@@ -46,12 +46,12 @@ type eraiRawsAtom struct {
 }
 
 type eraiRawsAtomEntry struct {
-	Title   string              `xml:"title"`
-	ID      string              `xml:"id"`
-	Updated string              `xml:"updated"`
-	Summary string              `xml:"summary"`
-	Content string              `xml:"content"`
-	Links   []eraiRawsAtomLink  `xml:"link"`
+	Title   string             `xml:"title"`
+	ID      string             `xml:"id"`
+	Updated string             `xml:"updated"`
+	Summary string             `xml:"summary"`
+	Content string             `xml:"content"`
+	Links   []eraiRawsAtomLink `xml:"link"`
 }
 
 type eraiRawsAtomLink struct {
@@ -61,13 +61,13 @@ type eraiRawsAtomLink struct {
 }
 
 type eraiRawsFeedItem struct {
-	Title       string                   `xml:"title"`
-	Link        string                   `xml:"link"`
-	GUID        string                   `xml:"guid"`
-	PubDate     string                   `xml:"pubDate"`
-	Description string                   `xml:"description"`
-	Content     string                   `xml:"encoded"`
-	Enclosures  []eraiRawsRSSEnclosure   `xml:"enclosure"`
+	Title       string                 `xml:"title"`
+	Link        string                 `xml:"link"`
+	GUID        string                 `xml:"guid"`
+	PubDate     string                 `xml:"pubDate"`
+	Description string                 `xml:"description"`
+	Content     string                 `xml:"encoded"`
+	Enclosures  []eraiRawsRSSEnclosure `xml:"enclosure"`
 }
 
 type eraiRawsRSSEnclosure struct {
@@ -236,11 +236,13 @@ func getEraiRawsBody(ctx context.Context, targetURL, referer string) ([]byte, er
 		return nil, err
 	}
 
+	// checked before the status: the feed answers 403 when the token is
+	// missing or invalid, and the hint is more useful than the bare status
+	if isEraiRawsAuthBlocked(body) {
+		return nil, fmt.Errorf("erai-raws requires authentication (status %d: %s); set INDEXER_ERAI_RAWS_RSS_URL or ERAI_RAWS_AUTH_TOKEN/ERAI_RAWS_USERNAME/ERAI_RAWS_PASSWORD", resp.StatusCode, summarizeEraiRawsBody(body))
+	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return nil, fmt.Errorf("erai-raws request failed with status %d: %s", resp.StatusCode, summarizeEraiRawsBody(body))
-	}
-	if isEraiRawsAuthBlocked(body) {
-		return nil, fmt.Errorf("erai-raws requires authentication; set INDEXER_ERAI_RAWS_RSS_URL or ERAI_RAWS_AUTH_TOKEN/ERAI_RAWS_USERNAME/ERAI_RAWS_PASSWORD")
 	}
 
 	return body, nil

@@ -17,7 +17,7 @@ Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org
 - [starck-filmes](https://starckfilmes-v30.com/) (also supports the [starckfilmesnet.com](https://starckfilmesnet.com/) layout via `INDEXER_STARCK_FILMES_URL`)
 - [rede-torrent](https://redestorrents.com/)
 - [vaca-torrent](https://vaqueirofilmes.com/)
-- [erai-raws](https://www.erai-raws.info/)
+- [erai-raws](https://www.erai-raws.info/) (requires an Erai-raws account token — see `ERAI_RAWS_AUTH_TOKEN`)
 - [darkmahou](https://darkmahou.io/) (episodes behind the `otakufilmes.org` video-ad gate are skipped)
 
 ## Deploy
@@ -69,7 +69,7 @@ You can configure the server using the following environment variables:
     - `erai_raws` defaults to `https://www.erai-raws.info/` and supports `INDEXER_ERAI_RAWS_URL`.
 - `INDEXER_BLUDV_APPEND_TRACKERS`: (optional) Append a short, stable tracker list to BLUDV magnet links while preserving the original `xt` first. Useful for Transmission setups that do not resolve hash-only magnets reliably. Default: `false`.
 - `INDEXER_ERAI_RAWS_RSS_URL`: (optional, recommended) Full authenticated Erai-raws RSS URL. Use this if your Erai-raws account provides a personal RSS/token URL.
-- `ERAI_RAWS_AUTH_TOKEN`: (optional) Authentication token for Erai-raws feeds.
+- `ERAI_RAWS_AUTH_TOKEN`: Authentication token for Erai-raws feeds, sent as `?token=`. Required by `erai_raws` (unless `INDEXER_ERAI_RAWS_RSS_URL` already carries it): the feed answers `403 Invalid or missing authentication token` without one.
 - `ERAI_RAWS_AUTH_QUERY_PARAM`: (optional) Query parameter name for `ERAI_RAWS_AUTH_TOKEN`. Default: `token`.
 - `ERAI_RAWS_AUTH_HEADER`: (optional) Header name for `ERAI_RAWS_AUTH_TOKEN` if your feed expects token authentication via header.
 - `ERAI_RAWS_USERNAME`: (optional) Username for Erai-raws authenticated requests.

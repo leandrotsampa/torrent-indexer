@@ -1,7 +1,11 @@
 package handler
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -35,5 +39,20 @@ func Test_buildEraiRawsFeedURL_UsesSearchFeedWhenQueryIsProvided(t *testing.T) {
 	}
 	if values.Get("auth") != "abc" {
 		t.Fatalf("auth = %q, want abc", values.Get("auth"))
+	}
+}
+
+func Test_getEraiRawsBody_MissingTokenPointsToConfig(t *testing.T) {
+	// since 2026-11 the feed answers 403 + wp_die "Invalid or missing
+	// authentication token" when no token is sent
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`<error><code>wp_die</code><title><![CDATA[Authentication Required]]></title><message><![CDATA[Invalid or missing authentication token.]]></message><data><status>403</status></data></error>`))
+	}))
+	defer srv.Close()
+
+	_, err := getEraiRawsBody(context.Background(), srv.URL+"/feed/", "")
+	if err == nil || !strings.Contains(err.Error(), "ERAI_RAWS_AUTH_TOKEN") {
+		t.Fatalf("getEraiRawsBody() error = %v, want a hint about ERAI_RAWS_AUTH_TOKEN", err)
 	}
 }
