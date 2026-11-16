@@ -201,3 +201,50 @@ func Test_cleanVacaMagnetTrackers(t *testing.T) {
 		t.Fatalf("cleanVacaMagnetTrackers() changed a valid magnet: %q", got)
 	}
 }
+
+func Test_isVacaResolverLink(t *testing.T) {
+	tests := map[string]bool{
+		"https://systemtech.space/enc/go.php?id=abc":     true,
+		"https://vaqueirofilmes.com/enc/go.php?id=abc":   true, // moved to the site's own host in 2026-11
+		"https://vaqueirofilmes.com/enc/relay.php":       false,
+		"https://vaqueirofilmes.com/pt/movie/enc/go.php": false,
+		"https://example.com/go.php?id=abc":              false,
+	}
+	for link, want := range tests {
+		if got := isVacaResolverLink(link); got != want {
+			t.Errorf("isVacaResolverLink(%q) = %v, want %v", link, got, want)
+		}
+	}
+}
+
+func Test_vacaRelayURL(t *testing.T) {
+	tests := map[string]string{
+		"https://systemtech.space/enc/go.php?id=abc":   "https://systemtech.space/enc/relay.php",
+		"https://vaqueirofilmes.com/enc/go.php?id=abc": "https://vaqueirofilmes.com/enc/relay.php",
+		"::not a url": vacaSystemTechRelayURL,
+	}
+	for link, want := range tests {
+		if got := vacaRelayURL(link); got != want {
+			t.Errorf("vacaRelayURL(%q) = %q, want %q", link, got, want)
+		}
+	}
+}
+
+func Test_findVacaResolverHrefs(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(`<html><body>
+<a href="https://vaqueirofilmes.com/enc/go.php?id=AAA">1080p</a>
+<a href="https://systemtech.space/enc/go.php?id=BBB">720p</a>
+<a href="https://vaqueirofilmes.com/enc/go.php?id=AAA">dup</a>
+<a href="https://vaqueirofilmes.com/pt/movie/x/">other</a>
+</body></html>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := findVacaResolverHrefs(doc, "https://vaqueirofilmes.com/pt/movie-links/1/")
+	sort.Strings(got)
+	want := "https://systemtech.space/enc/go.php?id=BBB,https://vaqueirofilmes.com/enc/go.php?id=AAA"
+	if strings.Join(got, ",") != want {
+		t.Errorf("got %v, want %s", got, want)
+	}
+}

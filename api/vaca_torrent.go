@@ -26,7 +26,7 @@ import (
 
 var vacaTorrent = IndexerMeta{
 	Label: "vaca_torrent",
-	URL:   utils.GetIndexerURLFromEnv("INDEXER_VACA_TORRENT_URL", "https://vaqueirofilmes1.com/pt/"),
+	URL:   utils.GetIndexerURLFromEnv("INDEXER_VACA_TORRENT_URL", "https://vaqueirofilmes.com/pt/"),
 	// Search results are loaded via WordPress admin-ajax (action=filtrar_busca);
 	// the endpoint lives at the root of the host of URL.
 	SearchURL:   "/wp-admin/admin-ajax.php",
@@ -265,7 +265,9 @@ func cleanVacaMagnetTrackers(magnetLink string) string {
 var commentRegex = regexp.MustCompile(`<!--(.*?)-->`)
 
 var (
-	vacaSystemTechLinkRE   = regexp.MustCompile(`^https?://systemtech\.space/enc/go\.php`)
+	// the resolver lived on systemtech.space and moved to the site's own host
+	// (vaqueirofilmes.com/enc/go.php) in 2026-11, so the host is not pinned
+	vacaSystemTechLinkRE   = regexp.MustCompile(`^https?://[^/]+/enc/go\.php\?`)
 	vacaSystemTechNextRE   = regexp.MustCompile(`(?i)(?:const|let|var)\s+next\s*=\s*"([^"]+)"`)
 	vacaLocationReplaceRE  = regexp.MustCompile(`(?i)(?:location\.replace|window\.location\.replace)\(\s*"([^"]+)"\s*\)|(?:window\.)?location(?:\.href)?\s*=\s*"([^"]+)"`)
 	vacaSecondStageURLRE   = regexp.MustCompile(`(?i)var\s+URL_ETAPA2\s*=\s*"([^"]+)"`)
@@ -313,16 +315,38 @@ func getVacaTorrentLinkedMagnets(ctx context.Context, i *Indexer, doc *goquery.D
 	return utils.StableUniq(magnetLinks)
 }
 
-func getVacaSystemTechDocMagnets(ctx context.Context, i *Indexer, doc *goquery.Document, pageURL string) []string {
+// isVacaResolverLink reports whether link is an enc/go.php resolver link.
+func isVacaResolverLink(link string) bool {
+	return vacaSystemTechLinkRE.MatchString(link)
+}
+
+// vacaRelayURL returns the enc/relay.php endpoint on the resolver link's host.
+func vacaRelayURL(link string) string {
+	parsed, err := url.Parse(link)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return vacaSystemTechRelayURL
+	}
+	return parsed.Scheme + "://" + parsed.Host + "/enc/relay.php"
+}
+
+// findVacaResolverHrefs collects the unique enc/go.php resolver links of a page.
+func findVacaResolverHrefs(doc *goquery.Document, pageURL string) []string {
 	var hrefs []string
-	doc.Find("a[href*=\"systemtech.space/enc/go.php\"]").Each(func(_ int, s *goquery.Selection) {
-		if href, exists := s.Attr("href"); exists && href != "" {
-			hrefs = append(hrefs, resolveVacaHref(href, pageURL))
+	doc.Find("a[href*=\"/enc/go.php\"]").Each(func(_ int, s *goquery.Selection) {
+		href, exists := s.Attr("href")
+		if !exists || href == "" {
+			return
+		}
+		if resolved := resolveVacaHref(href, pageURL); isVacaResolverLink(resolved) {
+			hrefs = append(hrefs, resolved)
 		}
 	})
+	return utils.StableUniq(hrefs)
+}
 
+func getVacaSystemTechDocMagnets(ctx context.Context, i *Indexer, doc *goquery.Document, pageURL string) []string {
 	var magnetLinks []string
-	for _, href := range utils.StableUniq(hrefs) {
+	for _, href := range findVacaResolverHrefs(doc, pageURL) {
 		resolvedMagnets, err := getVacaSystemTechMagnets(ctx, i, href, pageURL)
 		if err != nil {
 			logging.Warn().Err(err).Str("href", href).Msg("Failed to resolve VacaTorrent SystemTech link")
@@ -334,7 +358,7 @@ func getVacaSystemTechDocMagnets(ctx context.Context, i *Indexer, doc *goquery.D
 }
 
 func getVacaSystemTechMagnets(ctx context.Context, i *Indexer, link, referer string) ([]string, error) {
-	if !vacaSystemTechLinkRE.MatchString(link) {
+	if !isVacaResolverLink(link) {
 		return nil, fmt.Errorf("unsupported VacaTorrent resolver link: %s", link)
 	}
 
@@ -352,7 +376,26 @@ func getVacaSystemTechMagnets(ctx context.Context, i *Indexer, link, referer str
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 
-	body, finalURL, err := fetchVacaResolverURL(ctx, client, link, referer)
+	// the resolver host may sit behind a Cloudflare challenge: fall back to
+	// the requester (and so FlareSolverr) whenever the plain client is blocked
+	fetch := func(targetURL, ref string) ([]byte, string, error) {
+		body, finalURL, err := fetchVacaResolverURL(ctx, client, targetURL, ref)
+		if err == nil {
+			return body, finalURL, nil
+		}
+		doc, ferr := i.requester.GetDocument(ctx, targetURL, ref)
+		if ferr != nil {
+			return nil, "", fmt.Errorf("%w (flaresolverr fallback: %v)", err, ferr)
+		}
+		defer doc.Close()
+		body, ferr = io.ReadAll(doc)
+		if ferr != nil {
+			return nil, "", ferr
+		}
+		return body, targetURL, nil
+	}
+
+	body, finalURL, err := fetch(link, referer)
 	if err != nil {
 		return nil, err
 	}
@@ -361,10 +404,15 @@ func getVacaSystemTechMagnets(ctx context.Context, i *Indexer, link, referer str
 		return magnets, nil
 	}
 
+	// current flow: go.php lands straight on the interstitial carrying URL_ETAPA2
+	if secondStageURL := getVacaJSString(body, vacaSecondStageURLRE); secondStageURL != "" {
+		return resolveVacaSecondStage(ctx, i, fetch, cacheKey, secondStageURL, finalURL)
+	}
+
 	nextURL := getVacaJSString(body, vacaSystemTechNextRE)
-	relayURL := vacaSystemTechRelayURL
+	relayURL := vacaRelayURL(link)
 	if nextURL != "" {
-		nextBody, nextFinalURL, err := fetchVacaResolverURL(ctx, client, nextURL, finalURL)
+		nextBody, nextFinalURL, err := fetch(nextURL, finalURL)
 		if err != nil {
 			logging.Debug().Err(err).Str("url", nextURL).Msg("Failed to fetch VacaTorrent t.co interstitial")
 		} else {
@@ -375,7 +423,7 @@ func getVacaSystemTechMagnets(ctx context.Context, i *Indexer, link, referer str
 		}
 	}
 
-	body, finalURL, err = fetchVacaResolverURL(ctx, client, relayURL, finalURL)
+	body, finalURL, err = fetch(relayURL, finalURL)
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +437,13 @@ func getVacaSystemTechMagnets(ctx context.Context, i *Indexer, link, referer str
 		return nil, fmt.Errorf("VacaTorrent second stage URL not found")
 	}
 
-	body, _, err = fetchVacaResolverURL(ctx, client, secondStageURL, finalURL)
+	return resolveVacaSecondStage(ctx, i, fetch, cacheKey, secondStageURL, finalURL)
+}
+
+type vacaResolverFetch func(targetURL, referer string) ([]byte, string, error)
+
+func resolveVacaSecondStage(ctx context.Context, i *Indexer, fetch vacaResolverFetch, cacheKey, secondStageURL, referer string) ([]string, error) {
+	body, _, err := fetch(secondStageURL, referer)
 	if err != nil {
 		return nil, err
 	}
