@@ -154,15 +154,18 @@ func buildDarkmahouURL(metadata IndexerMeta, q, page string) string {
 }
 
 // extractDarkmahouSearchLinks collects the anime page URLs from a search/listing
-// page. Search results live in div.listupd as article.bs cards linking via
-// a.tip. The home/listing pages use dm-latest sections of article.dm-card
-// cards; the home stacks several of them (latest releases, new animes, movies,
-// recommendations) and only the first one — the latest releases — is indexed.
+// page. Legacy search results live in div.listupd as article.bs cards linking
+// via a.tip; current ones in main.dm-search-results as article.dm-card cards
+// (also served for an empty "?s=" query). The home/listing pages use dm-latest
+// sections of article.dm-card cards; the home stacks several of them (latest
+// releases, new animes, movies, recommendations) and only the first one — the
+// latest releases — is indexed.
 func extractDarkmahouSearchLinks(doc *goquery.Document) []string {
 	var links []string
 	seen := map[string]bool{}
-	cards := doc.Find("div.listupd article.bs a.tip").AddSelection(
-		doc.Find("section.dm-latest").First().Find(".dm-grid article.dm-card > a[href]"))
+	cards := doc.Find("div.listupd article.bs a.tip").
+		AddSelection(doc.Find("main.dm-search-results .dm-grid article.dm-card > a[href]")).
+		AddSelection(doc.Find("section.dm-latest").First().Find(".dm-grid article.dm-card > a[href]"))
 	cards.Each(func(_ int, s *goquery.Selection) {
 		href, ok := s.Attr("href")
 		if !ok {

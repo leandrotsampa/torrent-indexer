@@ -352,3 +352,28 @@ func TestExtractDarkmahouYear(t *testing.T) {
 		t.Errorf("extractDarkmahouYear() fallback = %q, want %q", got, "2019")
 	}
 }
+
+// darkmahouNewLayoutSearch mirrors the current search page (also served for an
+// empty "?s=" query): the results grid lives in main.dm-search-results, outside
+// any dm-latest section, next to an aside with unrelated cards.
+const darkmahouNewLayoutSearch = `
+<main class="postbody dm-main dm-library dm-search-results" aria-labelledby="dm-search-title">
+<header class="dm-library-hero"><h1 id="dm-search-title">Busca</h1><span class="dm-library-count">2 resultados encontrados</span></header>
+<div class="dm-grid">
+	<article class="dm-card"> <a href="https://darkmahou.io/one-piece/"><div class="dm-poster"></div><h3>One Piece</h3></a></article>
+	<article class="dm-card"> <a href="https://darkmahou.io/one-piece-film-strong-world/"><h3>Strong World</h3></a></article>
+</div></main>
+<aside class="dm-home-aside"><div class="dm-grid"><article class="dm-card"> <a href="https://darkmahou.io/popular/"><h3>Pop</h3></a></article></div></aside>`
+
+func TestExtractDarkmahouSearchLinksSearchResults(t *testing.T) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(darkmahouNewLayoutSearch))
+	if err != nil {
+		t.Fatalf("failed to parse fixture: %v", err)
+	}
+
+	got := extractDarkmahouSearchLinks(doc)
+	want := []string{"https://darkmahou.io/one-piece/", "https://darkmahou.io/one-piece-film-strong-world/"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("got %v, want %v (only the search results grid)", got, want)
+	}
+}

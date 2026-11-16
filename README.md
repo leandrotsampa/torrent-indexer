@@ -18,7 +18,7 @@ Visit [https://torrent-indexer.darklyn.org/](https://torrent-indexer.darklyn.org
 - [rede-torrent](https://redestorrents.com/)
 - [vaca-torrent](https://vaqueirofilmes.com/)
 - [erai-raws](https://www.erai-raws.info/)
-- [darkmahou](https://darkmahou.io/)
+- [darkmahou](https://darkmahou.io/) (episodes behind the `otakufilmes.org` video-ad gate are skipped)
 
 ## Deploy
 
