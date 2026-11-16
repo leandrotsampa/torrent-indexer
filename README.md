@@ -112,9 +112,28 @@ the `keywordsfilters` of the YML definitions (`and|es|y|et → e`, `SxxEyy →
 temporada N`, and dropping the season markers for the anime indexers), which
 Prowlarr does not apply to a Generic Torznab indexer.
 
-Subtitles are deliberately left out: Sonarr/Radarr have no support for the
-torznab `subs` attribute ([Sonarr#7625](https://github.com/Sonarr/Sonarr/issues/7625))
-and Prowlarr does not forward it, so nothing would consume it.
+Subtitle tracks are deliberately left out of the attributes: Sonarr/Radarr have no
+support for the torznab `subs` attribute ([Sonarr#7625](https://github.com/Sonarr/Sonarr/issues/7625))
+and Prowlarr does not forward it, so nothing would consume it. The dubbed ×
+subtitled distinction travels in the title instead — see
+[Release title tags](#release-title-tags).
+
+## Release title tags
+
+Every release title (the `title` field of the JSON API and of the Torznab feed)
+ends with the audio languages torrent-indexer detected, in parentheses, plus
+`legendado` when the release is subtitled:
+
+| Release | Title |
+|---|---|
+| Dubbed / national | `Filme 2025 1080p (brazilian)` |
+| Dual audio | `Filme 2025 1080p DUAL (brazilian, eng)` |
+| Original audio known, no Portuguese | `Filme 2025 1080p (eng, legendado)` |
+| No audio detected, but the title or a file says "Legendado"/"LEG" | `Filme 2025 1080p (legendado)` |
+
+Portuguese audio always wins: a post announcing both "Dublado" and "Legendado"
+gets only `(brazilian)`. Sonarr/Radarr ignore these words when parsing, so they
+are safe to keep, and a custom format can match them.
 
 ## Integrating with Jackett
 

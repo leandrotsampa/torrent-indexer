@@ -83,3 +83,55 @@ func Test_addAudio(t *testing.T) {
 		}
 	}
 }
+
+func TestAppendAudioTagsMarksSubtitledReleases(t *testing.T) {
+	tests := []struct {
+		name  string
+		it    schema.IndexedTorrent
+		title string
+	}{
+		{
+			name:  "known audio without portuguese",
+			it:    schema.IndexedTorrent{Title: "Superman 2025 1080p WEB-DL", Audio: []schema.Audio{schema.AudioEnglish}},
+			title: "Superman 2025 1080p WEB-DL (eng, legendado)",
+		},
+		{
+			name:  "explicit marker without known audio",
+			it:    schema.IndexedTorrent{Title: "Superman 2025 1080p WEB-DL Legendado"},
+			title: "Superman 2025 1080p WEB-DL Legendado (legendado)",
+		},
+		{
+			name:  "LEG marker in a video file name",
+			it:    schema.IndexedTorrent{Title: "Superman 2025 1080p", Files: []schema.File{{Path: "Superman.2025.1080p.WEB-DL.LEG.mkv"}}},
+			title: "Superman 2025 1080p (legendado)",
+		},
+		{
+			name:  "dual audio is not subtitled",
+			it:    schema.IndexedTorrent{Title: "Superman 2025 1080p WEB-DL DUAL", Audio: []schema.Audio{schema.AudioEnglish}},
+			title: "Superman 2025 1080p WEB-DL DUAL (brazilian, eng)",
+		},
+		{
+			name:  "portuguese audio wins over a legendado marker",
+			it:    schema.IndexedTorrent{Title: "Superman 2025 Dublado e Legendado", Audio: []schema.Audio{schema.AudioPortuguese}},
+			title: "Superman 2025 Dublado e Legendado (brazilian)",
+		},
+		{
+			name:  "unknown audio and no marker stays untouched",
+			it:    schema.IndexedTorrent{Title: "Superman 2025 1080p WEB-DL"},
+			title: "Superman 2025 1080p WEB-DL",
+		},
+		{
+			name:  "leg inside a word is not a marker",
+			it:    schema.IndexedTorrent{Title: "Legacy of Kain 2025 Legend"},
+			title: "Legacy of Kain 2025 Legend",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AppendAudioTags(&Indexer{}, &http.Request{}, []schema.IndexedTorrent{tt.it})
+			if got[0].Title != tt.title {
+				t.Errorf("Title = %q, want %q", got[0].Title, tt.title)
+			}
+		})
+	}
+}

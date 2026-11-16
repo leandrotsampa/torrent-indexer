@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hbollon/go-edlib"
 	"github.com/leandrotsampa/torrent-indexer/logging"
 	"github.com/leandrotsampa/torrent-indexer/schema"
 	"github.com/leandrotsampa/torrent-indexer/utils"
-	"github.com/hbollon/go-edlib"
 )
 
 // CleanupTitleWebsites removes unwanted characters from the title
@@ -34,6 +34,7 @@ func AppendAudioTags(_ *Indexer, _ *http.Request, torrents []schema.IndexedTorre
 		// FullfilMissingMetadata), which usually does not repeat the dub marker
 		// the site published next to the download link.
 		audio := addAudio(it.Audio, getAudioFromTitle(it.Title, it.Audio))
+		names := []string{it.Title}
 
 		// for each video file, get audio ISO639-2 code and append to title
 		for _, file := range it.Files {
@@ -42,10 +43,11 @@ func AppendAudioTags(_ *Indexer, _ *http.Request, torrents []schema.IndexedTorre
 				continue
 			}
 			audio = addAudio(audio, getAudioFromTitle(file.Path, audio))
+			names = append(names, file.Path)
 		}
 
 		torrents[i].Audio = audio
-		torrents[i].Title = appendAudioISO639_2Code(it.Title, audio)
+		torrents[i].Title = appendReleaseTags(it.Title, audio, isSubtitledRelease(audio, names...))
 	}
 
 	return torrents

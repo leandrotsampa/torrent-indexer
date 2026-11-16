@@ -44,7 +44,7 @@ var GlobalPostProcessors = []PostProcessorFunc{
 	FullfilMissingMetadata, // Fill missing size or title metadata
 	CleanupTitleWebsites,   // Remove website names from titles
 	FallbackPostTitle,      // Fallback to original title if empty
-	AppendAudioTags,        // Add (brazilian, eng, etc.) audio tags to titles
+	AppendAudioTags,        // Add (brazilian, eng, legendado, etc.) audio tags to titles
 	ApplySorting,           // Sort results based on sortBy and sortDirection params
 	SendToSearchIndexer,    // Send indexed torrents to Meilisearch
 	FilterBy,               // Filter results based on query params (audio, etc.)

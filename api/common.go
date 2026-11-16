@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/leandrotsampa/torrent-indexer/logging"
 	"github.com/leandrotsampa/torrent-indexer/schema"
 	"github.com/leandrotsampa/torrent-indexer/utils"
-	"github.com/PuerkitoBio/goquery"
 )
 
 // getDocument retrieves a document from the cache or makes a request to get it.
@@ -410,15 +410,52 @@ func appendTrackersToMagnetLink(magnetLink string, trackers []string) string {
 // It formats the title to include the audio languages in parentheses.
 // Example: "Movie Title (eng, por)"
 func appendAudioISO639_2Code(title string, a []schema.Audio) string {
-	if len(a) > 0 {
-		audio := []string{}
-		for _, lang := range a {
-			audio = append(audio, lang.String())
-		}
-		audio = slices.Compact(audio)
-		title = fmt.Sprintf("%s (%s)", title, strings.Join(audio, ", "))
+	return appendReleaseTags(title, a, false)
+}
+
+// subtitledTag marks releases without Portuguese audio, e.g. "(eng, legendado)",
+// so they can be told apart (and filtered) from dubbed ones by the title alone.
+const subtitledTag = "legendado"
+
+// subtitledMarkerRE matches the "Legendado"/"Legendada" words and the uppercase
+// "LEG" release tag (case-sensitive, so words like "Legacy" or "leg" don't match).
+var subtitledMarkerRE = regexp.MustCompile(`(?i:\blegendad[oa]s?\b)|\bLEG\b`)
+
+// appendReleaseTags appends the audio ISO 639-2 codes and, when subtitled, the
+// subtitledTag to the title between parentheses.
+func appendReleaseTags(title string, a []schema.Audio, subtitled bool) string {
+	tags := []string{}
+	for _, lang := range a {
+		tags = append(tags, lang.String())
+	}
+	tags = slices.Compact(tags)
+	if subtitled {
+		tags = append(tags, subtitledTag)
+	}
+	if len(tags) > 0 {
+		title = fmt.Sprintf("%s (%s)", title, strings.Join(tags, ", "))
 	}
 	return title
+}
+
+// isSubtitledRelease reports whether a release is subtitled rather than dubbed:
+// never when it carries Portuguese audio; otherwise when the audio is known
+// (so it is the original one) or a name says "Legendado"/"LEG".
+func isSubtitledRelease(audio []schema.Audio, names ...string) bool {
+	for _, a := range audio {
+		if a.LanguageName() == schema.Audio(schema.AudioPortuguese).LanguageName() {
+			return false
+		}
+	}
+	if len(audio) > 0 {
+		return true
+	}
+	for _, name := range names {
+		if subtitledMarkerRE.MatchString(name) {
+			return true
+		}
+	}
+	return false
 }
 
 // getAudioFromTitle extracts audio languages from the release title.
