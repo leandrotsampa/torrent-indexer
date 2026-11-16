@@ -86,6 +86,30 @@ func New(rawurl string) (*Goscrape, error) {
 	}, nil
 }
 
+// Close releases the tracker socket. The scraper can still be used afterwards:
+// the next request opens a new connection.
+func (g *Goscrape) Close() error {
+	g.Lock()
+	defer g.Unlock()
+
+	g.session = time.Time{}
+	if g.conn == nil {
+		return nil
+	}
+	err := g.conn.Close()
+	g.conn = nil
+	return err
+}
+
+// resetConn drops a half-open connection after a failed connect handshake, so
+// its socket is not leaked. Callers must hold the lock.
+func (g *Goscrape) resetConn() {
+	if g.conn != nil {
+		_ = g.conn.Close()
+		g.conn = nil
+	}
+}
+
 // SetRetryLimit sets the maximum number of attempts to do before giving up
 func (g *Goscrape) SetRetryLimit(retries int) {
 	g.retries = retries
@@ -116,10 +140,19 @@ func (g *Goscrape) connect() (net.Conn, uint64, error) {
 		binary.BigEndian.PutUint32(buf[8:], 0)    // action connect
 		binary.BigEndian.PutUint32(buf[12:], tid) // transaction id
 
+		// replace (and release) any socket from an expired session
+		g.resetConn()
 		g.conn, err = net.DialTimeout("udp", g.url, g.timeout)
 		if err != nil {
+			g.conn = nil
 			return nil, 0, err
 		}
+		ok := false
+		defer func() {
+			if !ok {
+				g.resetConn()
+			}
+		}()
 
 		var n, retries int
 
@@ -166,6 +199,7 @@ func (g *Goscrape) connect() (net.Conn, uint64, error) {
 
 		g.connectionID = binary.BigEndian.Uint64(buf[8:])
 		g.session = time.Now()
+		ok = true
 	}
 	return g.conn, g.connectionID, nil
 }

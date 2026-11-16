@@ -197,6 +197,7 @@ func GetPeers(ctx context.Context, r *cache.Redis, infoHash string, trackers []s
 				peerChan <- nil
 				return
 			}
+			defer announcer.Close()
 
 			announcer.SetTimeout(timeout)
 			announcer.SetRetryLimit(1)

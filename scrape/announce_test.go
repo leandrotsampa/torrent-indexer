@@ -133,3 +133,38 @@ func TestPeerIDIsStableAndPrefixed(t *testing.T) {
 		t.Fatal("peer id changed between calls")
 	}
 }
+
+func TestCloseReleasesTrackerSocket(t *testing.T) {
+	trackerURL := startFakeTracker(t, []netip.AddrPort{netip.MustParseAddrPort("192.168.1.10:51413")}, 1, 1)
+
+	g, err := New(trackerURL)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	g.SetTimeout(2 * time.Second)
+
+	if err := g.Close(); err != nil {
+		t.Fatalf("Close() before connecting error = %v", err)
+	}
+
+	if _, err := g.Announce([]byte("0123456789abcdef0123456789abcdef01234567")); err != nil {
+		t.Fatalf("Announce() error = %v", err)
+	}
+	conn := g.conn
+	if conn == nil {
+		t.Fatal("expected an open tracker socket after Announce")
+	}
+
+	if err := g.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if _, err := conn.Write([]byte{0}); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("socket still usable after Close(): write error = %v", err)
+	}
+
+	// a closed scraper reconnects instead of reusing the dead socket
+	if _, err := g.Announce([]byte("0123456789abcdef0123456789abcdef01234567")); err != nil {
+		t.Fatalf("Announce() after Close() error = %v", err)
+	}
+	_ = g.Close()
+}
