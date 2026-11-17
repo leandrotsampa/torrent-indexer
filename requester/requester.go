@@ -9,6 +9,7 @@ import (
 	neturl "net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fereidani/httpdecompressor"
@@ -35,6 +36,9 @@ type Requster struct {
 	c                         *cache.Redis
 	httpClient                *http.Client
 	shortLivedCacheExpiration time.Duration
+	// siteLocks serializes the FlareSolverr solves of each site (host ->
+	// chan struct{}): one request solves, the others reuse its clearance.
+	siteLocks sync.Map
 }
 
 func NewRequester(fs *FlareSolverr, c *cache.Redis, timeout time.Duration) *Requster {
@@ -83,12 +87,21 @@ func (i *Requster) GetDocument(ctx context.Context, url string, referer ...strin
 
 	// Add browser-like headers to spoof a real browser
 	spoofBrowserHeaders(req, ref)
+	cleared := i.applyClearance(req, url)
 
 	// some CDNs (e.g. Cloudflare on redestorrents.com) intermittently answer
-	// 403/429/5xx to the same client; a new attempt usually goes through
+	// 403/429/5xx to the same client; a new attempt usually goes through. A
+	// Cloudflare challenge is final, though: it goes straight to FlareSolverr.
 	var resp *http.Response
 	for attempt := 0; ; attempt++ {
 		resp, err = i.httpClient.Do(req)
+		if err == nil && isCloudflareChallenge(resp) {
+			if cleared {
+				// the site no longer accepts this clearance: solve again
+				i.fs.dropClearance(url)
+			}
+			break
+		}
 		if err != nil || !isRetryableStatus(resp.StatusCode) || attempt == maxPlainRetries {
 			break
 		}
@@ -104,10 +117,11 @@ func (i *Requster) GetDocument(ctx context.Context, url string, referer ...strin
 			return nil, fmt.Errorf("failed to create request for url %s: %w", url, err)
 		}
 		spoofBrowserHeaders(req, ref)
+		i.applyClearance(req, url)
 	}
 	if err != nil {
 		// try request with flare solverr
-		body, err = i.fs.Get(ctx, url, 3)
+		body, err = i.solve(ctx, url, ref)
 		if err != nil {
 			return nil, fmt.Errorf("failed to do request for url %s: %w", url, err)
 		}
@@ -139,7 +153,7 @@ func (i *Requster) GetDocument(ctx context.Context, url string, referer ...strin
 	// also fall back on a still-blocked answer (e.g. a 403 without challenge markers)
 	if hasChallange(bodyByte) || (resp != nil && isRetryableStatus(resp.StatusCode)) {
 		// try request with flare solverr
-		body, err = i.fs.Get(ctx, url, 3)
+		body, err = i.solve(ctx, url, ref)
 		if err != nil {
 			return nil, fmt.Errorf("failed to do request for url %s: %w", url, err)
 		}
@@ -192,12 +206,16 @@ func (i *Requster) PostForm(ctx context.Context, url string, form neturl.Values,
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	req.Header.Del("Sec-Fetch-User")
 	req.Header.Del("Upgrade-Insecure-Requests")
+	cleared := i.applyClearance(req, url)
 
 	resp, err := i.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to do POST request for url %s: %w", url, err)
 	}
 	defer resp.Body.Close()
+	if cleared && isCloudflareChallenge(resp) {
+		i.fs.dropClearance(url)
+	}
 
 	body, err := httpdecompressor.Reader(resp)
 	if err != nil {
@@ -248,4 +266,93 @@ func isRetryableStatus(status int) bool {
 
 func hasChallange(body []byte) bool {
 	return challangeRegex.Match(body)
+}
+
+// applyClearance sends the Cloudflare clearance a previous solve left for the
+// site, with the user agent it was issued to; it reports whether it did.
+func (i *Requster) applyClearance(req *http.Request, url string) bool {
+	c, ok := i.fs.clearanceFor(url)
+	if !ok {
+		return false
+	}
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("Cookie", c.cookies)
+	return true
+}
+
+// ApplyClearance adds to req (built by a caller with its own HTTP client) the
+// Cloudflare clearance a previous solve left for the site; it reports whether
+// it did.
+func (i *Requster) ApplyClearance(req *http.Request) bool {
+	return i.applyClearance(req, req.URL.String())
+}
+
+// solve fetches url through FlareSolverr, one solve per site at a time. A
+// request that waited for another one's solve first retries the plain client
+// with the clearance it left, so a burst of pages costs a single solve.
+func (i *Requster) solve(ctx context.Context, url, ref string) (io.ReadCloser, error) {
+	release, err := i.lockSite(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	if body, ok := i.getWithClearance(ctx, url, ref); ok {
+		return body, nil
+	}
+	return i.fs.Get(ctx, url, 3)
+}
+
+// lockSite takes the solve lock of url's site, giving up with the context.
+func (i *Requster) lockSite(ctx context.Context, rawURL string) (func(), error) {
+	host := rawURL
+	if parsed, err := neturl.Parse(rawURL); err == nil {
+		host = strings.ToLower(parsed.Hostname())
+	}
+	lock, _ := i.siteLocks.LoadOrStore(host, make(chan struct{}, 1))
+	ch := lock.(chan struct{})
+	select {
+	case ch <- struct{}{}:
+		return func() { <-ch }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// getWithClearance fetches url with the plain client and the site's clearance,
+// if there is one; a clearance the site rejects is dropped.
+func (i *Requster) getWithClearance(ctx context.Context, url, ref string) (io.ReadCloser, bool) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, false
+	}
+	spoofBrowserHeaders(req, ref)
+	if !i.applyClearance(req, url) {
+		return nil, false
+	}
+
+	resp, err := i.httpClient.Do(req)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+	if isCloudflareChallenge(resp) {
+		i.fs.dropClearance(url)
+		return nil, false
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, false
+	}
+
+	decompressed, err := httpdecompressor.Reader(resp)
+	if err != nil {
+		return nil, false
+	}
+	defer decompressed.Close()
+	bodyByte, err := io.ReadAll(decompressed)
+	if err != nil || hasChallange(bodyByte) {
+		return nil, false
+	}
+	logging.Debug().Str("url", url).Msg("Request served from plain client with a fresh clearance")
+	return io.NopCloser(bytes.NewReader(bodyByte)), true
 }

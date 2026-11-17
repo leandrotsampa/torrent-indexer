@@ -31,6 +31,10 @@ type FlareSolverr struct {
 	// initialization instead of staying disabled for the process lifetime.
 	initMu          sync.Mutex
 	lastInitAttempt time.Time
+
+	// clearances keeps the Cloudflare cookies each solve hands out, so the
+	// requester can fetch the next pages of the site without solving again.
+	clearances *clearanceStore
 }
 
 // initRetryInterval throttles initialization retries while FlareSolverr is down.
@@ -55,6 +59,7 @@ func NewFlareSolverr(url string, timeoutMilli int, poolSize int) *FlareSolverr {
 		maxTimeout:  timeoutMilli,
 		httpClient:  httpClient,
 		sessionPool: sessionPool,
+		clearances:  newClearanceStore(),
 	}
 
 	if url != "" {
@@ -333,6 +338,8 @@ func (f *FlareSolverr) Get(ctx context.Context, _url string, attempts int) (io.R
 		return nil, fmt.Errorf("failed to get response: %s, statusCode: %s", response.Message, resp.Status)
 	}
 
+	f.saveClearance(_url, response)
+
 	// Check if "Under attack" is in the response
 	if strings.Contains(response.Solution.Response, "Under attack") {
 		return nil, fmt.Errorf("under attack")
@@ -393,4 +400,35 @@ func (f *FlareSolverr) Get(ctx context.Context, _url string, attempts int) (io.R
 
 	// Return the original response body
 	return io.NopCloser(bytes.NewReader([]byte(response.Solution.Response))), nil
+}
+
+// saveClearance records the Cloudflare clearance a successful solve left.
+func (f *FlareSolverr) saveClearance(rawURL string, response Response) {
+	cookies := make([]solvedCookie, 0, len(response.Solution.Cookies))
+	for _, c := range response.Solution.Cookies {
+		cookies = append(cookies, solvedCookie{Name: c.Name, Value: c.Value, Domain: c.Domain, Expiry: c.Expiry})
+	}
+	f.clearances.saveSolved(rawURL, response.Solution.UserAgent, cookies)
+}
+
+// clearanceFor returns the clearance that lets a plain client fetch rawURL.
+func (f *FlareSolverr) clearanceFor(rawURL string) (clearance, bool) {
+	if f == nil || f.clearances == nil {
+		return clearance{}, false
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return clearance{}, false
+	}
+	return f.clearances.lookup(parsed.Hostname())
+}
+
+// dropClearance forgets rawURL's clearance after the site rejected it.
+func (f *FlareSolverr) dropClearance(rawURL string) {
+	if f == nil || f.clearances == nil {
+		return
+	}
+	if parsed, err := url.Parse(rawURL); err == nil {
+		f.clearances.drop(parsed.Hostname())
+	}
 }

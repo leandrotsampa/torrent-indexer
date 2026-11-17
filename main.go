@@ -45,7 +45,8 @@ func main() {
 	metrics := monitoring.NewMetrics()
 	metrics.Register()
 
-	timeoutFlaresolverrMilli := 30000
+	// a FlareSolverr/Byparr solve usually takes 15-40s
+	timeoutFlaresolverrMilli := 60000
 	if v := os.Getenv("FLARESOLVERR_TIMEOUT_SECONDS"); v != "" {
 		if t, err := strconv.Atoi(v); err == nil {
 			timeoutFlaresolverrMilli = t * 1000

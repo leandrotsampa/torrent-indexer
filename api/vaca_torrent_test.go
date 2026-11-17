@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"testing"
@@ -246,5 +249,36 @@ func Test_findVacaResolverHrefs(t *testing.T) {
 	want := "https://systemtech.space/enc/go.php?id=BBB,https://vaqueirofilmes.com/enc/go.php?id=AAA"
 	if strings.Join(got, ",") != want {
 		t.Errorf("got %v, want %s", got, want)
+	}
+}
+
+// The resolver client must send the Cloudflare clearance (applied by prepare)
+// on the first request and on every redirect: go.php redirects to the
+// interstitial on the same, Cloudflare-protected, host.
+func Test_fetchVacaResolverURLPreparesEveryRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cookie") != "cf_clearance=ok" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		if r.URL.Path == "/enc/go.php" {
+			http.Redirect(w, r, "/interstitial", http.StatusFound)
+			return
+		}
+		_, _ = w.Write([]byte("<html>interstitial</html>"))
+	}))
+	defer srv.Close()
+
+	prepare := func(req *http.Request) { req.Header.Set("Cookie", "cf_clearance=ok") }
+	client, err := newVacaResolverClient(prepare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, finalURL, err := fetchVacaResolverURL(context.Background(), client, srv.URL+"/enc/go.php", "", prepare)
+	if err != nil {
+		t.Fatalf("fetchVacaResolverURL() error = %v", err)
+	}
+	if !strings.Contains(string(body), "interstitial") || !strings.HasSuffix(finalURL, "/interstitial") {
+		t.Errorf("body/final = %q/%q", body, finalURL)
 	}
 }

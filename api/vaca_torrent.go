@@ -368,7 +368,10 @@ func getVacaSystemTechMagnets(ctx context.Context, i *Indexer, link, referer str
 		return splitCachedVacaMagnets(cached), nil
 	}
 
-	client, err := newVacaResolverClient()
+	// the resolver host sits behind Cloudflare: send the clearance a previous
+	// solve left, so only the first link of a search goes through FlareSolverr
+	prepare := func(req *http.Request) { i.requester.ApplyClearance(req) }
+	client, err := newVacaResolverClient(prepare)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +382,7 @@ func getVacaSystemTechMagnets(ctx context.Context, i *Indexer, link, referer str
 	// the resolver host may sit behind a Cloudflare challenge: fall back to
 	// the requester (and so FlareSolverr) whenever the plain client is blocked
 	fetch := func(targetURL, ref string) ([]byte, string, error) {
-		body, finalURL, err := fetchVacaResolverURL(ctx, client, targetURL, ref)
+		body, finalURL, err := fetchVacaResolverURL(ctx, client, targetURL, ref, prepare)
 		if err == nil {
 			return body, finalURL, nil
 		}
@@ -456,7 +459,9 @@ func resolveVacaSecondStage(ctx context.Context, i *Indexer, fetch vacaResolverF
 	return magnets, nil
 }
 
-func newVacaResolverClient() (*http.Client, error) {
+// newVacaResolverClient builds the resolver client; prepare runs on every
+// redirect too (with a cookie jar Go does not forward the Cookie header there).
+func newVacaResolverClient(prepare func(*http.Request)) (*http.Client, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create VacaTorrent cookie jar: %w", err)
@@ -474,17 +479,23 @@ func newVacaResolverClient() (*http.Client, error) {
 				referer = via[len(via)-1].URL.String()
 			}
 			setVacaResolverHeaders(req, referer)
+			if prepare != nil {
+				prepare(req)
+			}
 			return nil
 		},
 	}, nil
 }
 
-func fetchVacaResolverURL(ctx context.Context, client *http.Client, targetURL, referer string) ([]byte, string, error) {
+func fetchVacaResolverURL(ctx context.Context, client *http.Client, targetURL, referer string, prepare func(*http.Request)) ([]byte, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create VacaTorrent resolver request: %w", err)
 	}
 	setVacaResolverHeaders(req, referer)
+	if prepare != nil {
+		prepare(req)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
