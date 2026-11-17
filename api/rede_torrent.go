@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
 
@@ -111,7 +112,23 @@ func (i *Indexer) HandlerRedeTorrentIndexer(w http.ResponseWriter, r *http.Reque
 // buildRedeTorrentURL builds the listing URL. Searches go through
 // "index.php?busca=<q>" (paginated with "&pagina=N"); the plain listing is
 // paginated with "pagina/N/".
+// sanitizeRedeTorrentQuery keeps only what the site's search handles. Its search
+// answers HTTP 500 to some punctuation — "ranma (2024)", "(x", "\"x\"", "@x" —
+// apparently from a full-text query in boolean mode, which the requester used to
+// mistake for a Cloudflare block. The site splits "1_2" or "1-2" into words
+// anyway, so dropping punctuation loses nothing.
+func sanitizeRedeTorrentQuery(q string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || strings.ContainsRune("-_.'", r) {
+			return r
+		}
+		return ' '
+	}, q)
+	return strings.Join(strings.Fields(cleaned), " ")
+}
+
 func buildRedeTorrentURL(metadata IndexerMeta, q, page string) string {
+	q = sanitizeRedeTorrentQuery(q)
 	if q != "" {
 		target := fmt.Sprintf("%s%s%s", metadata.URL, metadata.SearchURL, url.QueryEscape(q))
 		if page != "" {

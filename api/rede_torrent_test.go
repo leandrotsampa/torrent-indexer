@@ -152,6 +152,13 @@ func TestBuildRedeTorrentURL(t *testing.T) {
 		{"", "2", "https://redestorrents.com/pagina/2/"},
 		{"the boys", "", "https://redestorrents.com/index.php?busca=the+boys"},
 		{"the boys", "2", "https://redestorrents.com/index.php?busca=the+boys&pagina=2"},
+		// the site answers 500 to these: punctuation is dropped
+		{"ranma 1_2 (2024) 06", "", "https://redestorrents.com/index.php?busca=ranma+1_2+2024+06"},
+		{`ranma "x" @y`, "", "https://redestorrents.com/index.php?busca=ranma+x+y"},
+		{"ranma ½ & 2", "", "https://redestorrents.com/index.php?busca=ranma+%C2%BD+2"},
+		{"ranma 1-2 o'brien", "", "https://redestorrents.com/index.php?busca=ranma+1-2+o%27brien"},
+		// nothing searchable left: falls back to the listing
+		{"()", "", "https://redestorrents.com/"},
 	}
 	for _, c := range cases {
 		if got := buildRedeTorrentURL(meta, c.q, c.page); got != c.want {
