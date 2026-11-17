@@ -505,7 +505,7 @@ func getTorrentsDarkmahou(ctx context.Context, i *Indexer, link, referer string)
 
 				peer, seed, err = goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, trackers)
 				if err != nil {
-					logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
+					logging.Warn().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
 				}
 			}
 			// Keep a complete magnet display name (group/range/quality) as-is;

@@ -181,7 +181,7 @@ func getTorrentsTorrentDosFilmes(ctx context.Context, i *Indexer, link, referer 
 
 			peer, seed, err := goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, trackers)
 			if err != nil {
-				logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
+				logging.Warn().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
 			}
 
 			title := processTitle(title, magnetAudio)

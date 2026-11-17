@@ -334,7 +334,7 @@ func buildEraiRawsIndexedTorrents(ctx context.Context, i *Indexer, item eraiRaws
 		infoHash := parsedMagnet.InfoHash.String()
 		peer, seed, err := goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, parsedMagnet.Trackers)
 		if err != nil {
-			logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
+			logging.Warn().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
 		}
 
 		indexedTorrents = append(indexedTorrents, schema.IndexedTorrent{

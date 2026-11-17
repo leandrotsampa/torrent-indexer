@@ -1079,7 +1079,7 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 
 			peer, seed, err := goscrape.GetLeechsAndSeeds(ctx, i.redis, i.metrics, infoHash, trackers)
 			if err != nil {
-				logging.Error().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
+				logging.Warn().Err(err).Str("info_hash", infoHash).Msg("Failed to get leechers and seeders")
 			}
 
 			// if the number of sizes is equal to the number of magnets, then assign the size to each indexed torrent in order
