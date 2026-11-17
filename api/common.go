@@ -213,15 +213,35 @@ func isNoiseToken(lang string) bool {
 	return ok
 }
 
+// audioFieldRe finds the label of the field that lists the audio languages. The
+// optional "Qualidade do/de" prefix is captured only to tell apart the audio
+// *quality* field ("Qualidade do Audio: 10"), which ends in "Audio:" too.
+var audioFieldRe = regexp.MustCompile(`(?i:(qualidade\s+d[oe]\s+))?(?:.udio|Idioma|Languages):`)
+
+// audioValueRe takes the field value: what follows the label up to the end of
+// the line, skipping the separator character right after the colon.
+var audioValueRe = regexp.MustCompile(`^.?(.*)`)
+
+// findAudioLanguagesField returns the value of the first audio-language field
+// in text, and whether there was one.
+func findAudioLanguagesField(text string) (string, bool) {
+	for _, loc := range audioFieldRe.FindAllStringSubmatchIndex(text, -1) {
+		if loc[2] >= 0 {
+			continue // "Qualidade do Áudio: 10" rates the audio, it names no language
+		}
+		return audioValueRe.FindStringSubmatch(text[loc[1]:])[1], true
+	}
+	return "", false
+}
+
 // findAudioFromText extracts audio languages from a given text.
 // It looks for patterns like "Áudio: Português, Inglês" or "Idioma: Português, Inglês"
 func findAudioFromText(text string) []schema.Audio {
 	var audio []schema.Audio
-	re := regexp.MustCompile(`(.udio|Idioma|Languages):.?(.*)`)
-	audioMatch := re.FindStringSubmatch(text)
-	if len(audioMatch) > 0 {
-		sep := getSeparator(audioMatch[2])
-		langs_raw := strings.Split(audioMatch[2], sep)
+	field, ok := findAudioLanguagesField(text)
+	if ok {
+		sep := getSeparator(field)
+		langs_raw := strings.Split(field, sep)
 		for _, lang := range langs_raw {
 			lang = strings.TrimSpace(lang)
 			a := schema.GetAudioFromString(lang)

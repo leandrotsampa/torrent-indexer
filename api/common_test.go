@@ -190,6 +190,39 @@ Tamanho: 2.69 GB / 1.95 GB / 1.0 GB
 				schema.AudioEnglish,
 			},
 		},
+		{
+			name: "should ignore the audio quality field (starck-filmes)",
+			args: args{
+				text: "Qualidade do Audio: 10 ",
+			},
+			want: nil,
+		},
+		{
+			name: "should ignore the accented audio quality field",
+			args: args{
+				text: "Qualidade de Áudio: 9",
+			},
+			want: nil,
+		},
+		{
+			name: "should read the languages after the audio quality field on the same line",
+			args: args{
+				text: "Qualidade do Audio: 10 Idioma: Português | Inglês",
+			},
+			want: []schema.Audio{
+				schema.AudioPortuguese,
+				schema.AudioEnglish,
+			},
+		},
+		{
+			name: "should read the languages in the line after the audio quality field",
+			args: args{
+				text: "Qualidade do Audio: 10\nIdioma: Português",
+			},
+			want: []schema.Audio{
+				schema.AudioPortuguese,
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
