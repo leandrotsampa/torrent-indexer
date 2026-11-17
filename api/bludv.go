@@ -46,9 +46,12 @@ var bludvTransmissionTrackers = []string{
 }
 
 var (
-	bludvSeasonEpisodeQueryRE  = regexp.MustCompile(`(?i)\bs0*([0-9]{1,3})[\s._-]*e0*([0-9]{1,3})\b`)
-	bludvTemporadaEpisodeRE    = regexp.MustCompile(`(?i)\btemporada\s+0*([0-9]{1,3})\s+epis.?dio\s+0*([0-9]{1,3})\b`)
-	bludvSeasonOnlyQueryRE     = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}\b|\be0*[0-9]{1,3}\b|\btemporada\s+0*[0-9]{1,3}\b|\bepis.?dio\s+0*[0-9]{1,3}\b`)
+	bludvSeasonEpisodeQueryRE = regexp.MustCompile(`(?i)\bs0*([0-9]{1,3})[\s._-]*e0*([0-9]{1,3})\b`)
+	bludvTemporadaEpisodeRE   = regexp.MustCompile(`(?i)\btemporada\s+0*([0-9]{1,3})\s+epis.?dio\s+0*([0-9]{1,3})\b`)
+	bludvSeasonOnlyQueryRE    = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}\b|\be0*[0-9]{1,3}\b|\btemporada\s+0*[0-9]{1,3}\b|\bepis.?dio\s+0*[0-9]{1,3}\b`)
+	// bludvSeasonOnlyTokenRE matches a season asked without an episode ("S04"), which
+	// the site never finds: its posts name the season "4ª Temporada".
+	bludvSeasonOnlyTokenRE     = regexp.MustCompile(`(?i)\bs0*([0-9]{1,3})\b`)
 	bludvSeasonInReleaseNameRE = regexp.MustCompile(`(?i)\b0*([0-9]{1,3})\D{0,6}temporada\b|\btemporada\D{0,6}0*([0-9]{1,3})\b|\bs0*([0-9]{1,3})(?:[\s._-]*e0*[0-9]{1,3})?\b`)
 	bludvEpisodeInReleaseRE    = regexp.MustCompile(`(?i)\bs0*[0-9]{1,3}[\s._-]*e0*([0-9]{1,3})\b|\be0*([0-9]{1,3})\b|\bep(?:is.?dio|isode)?\.?\s*0*([0-9]{1,3})\b`)
 	// bludvEpisodeRangeRE matches a release covering more than one episode,
@@ -65,6 +68,10 @@ var (
 	bludvMultiResolutionRE     = regexp.MustCompile(`(?i)\b(?:480p|720p|1080p|2160p|4k)\b(?:\s*(?:[/|,]|\bor\b|\band\b|\be\b|\bou\b)\s*\b(?:480p|720p|1080p|2160p|4k)\b)+`)
 	bludvResolutionRE          = regexp.MustCompile(`(?i)\b(?:480p|720p|1080p|2160p|4k)\b`)
 	bludvNonWordRE             = regexp.MustCompile(`[^a-z0-9]+`)
+	bludvLetterDigitRE         = regexp.MustCompile(`([a-z])([0-9])`)
+	bludvDigitSeparatorRE      = regexp.MustCompile(`([0-9])\s*[_/-]\s*([0-9])`)
+	bludvYearQueryRE           = regexp.MustCompile(`\(?\b(?:19|20)[0-9]{2}\b\)?`)
+	bludvYearTokenRE           = regexp.MustCompile(`^(?:19|20)[0-9]{2}$`)
 	bludvAnchorRE              = regexp.MustCompile(`(?is)<a(?:\s[^>]*?)?\shref\s*=\s*["']([^"']*)["'][^>]*>(.*?)</a>`)
 	bludvSystemAdsHrefRE       = regexp.MustCompile(`(?i)systemads\d*\.[a-z]+/go\.php`)
 	bludvHTMLTagRE             = regexp.MustCompile(`(?is)<[^>]+>`)
@@ -101,6 +108,7 @@ var bludvComparableTextReplacer = strings.NewReplacer(
 	"ç", "c",
 	"ª", "a",
 	"º", "o",
+	"½", " 1 2 ",
 )
 
 // bludvAdwareDomains lists the gateways that hide the magnet link inside an
@@ -160,7 +168,7 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 	rawQ := r.URL.Query().Get("q")
 	q := normalizeBluDVSearchQuery(rawQ)
 	page := r.URL.Query().Get("page")
-	requestedSeason := extractBluDVSeason(rawQ)
+	requestedSeason := extractBluDVRequestedSeason(rawQ)
 	targetURL := buildBluDVURL(metadata, q, page)
 
 	logging.InfoWithRequest(r).Str("target_url", targetURL).Msg("Processing indexer request")
@@ -393,9 +401,25 @@ func normalizeBluDVSearchQuery(q string) string {
 
 	q = replaceBluDVSeasonEpisodeWithSeason(q, bludvSeasonEpisodeQueryRE)
 	q = replaceBluDVSeasonEpisodeWithSeason(q, bludvTemporadaEpisodeRE)
+	q = replaceBluDVSeasonEpisodeWithSeason(q, bludvSeasonOnlyTokenRE)
 	q = normalizeBluDVSearchConjunctions(q)
+	if extractBluDVRequestedSeason(q) != "" {
+		q = simplifyBluDVSeasonSearch(q)
+	}
 
 	return strings.Join(strings.Fields(q), " ")
+}
+
+// simplifyBluDVSeasonSearch drops from a season search what makes the site's
+// search miss the post. Every word must appear in the post, so the year Sonarr
+// appends to the series name ("Ranma½ (2024)") only finds the first season's
+// post, and "½" or "1_2" never match a title written "Ranma1/2", while "1 2"
+// does. Which post is the right one is still decided by the title check.
+func simplifyBluDVSeasonSearch(q string) string {
+	q = strings.ReplaceAll(q, "½", " 1 2 ")
+	q = bludvDigitSeparatorRE.ReplaceAllString(q, "$1 $2")
+	q = bludvYearQueryRE.ReplaceAllString(q, " ")
+	return q
 }
 
 func normalizeBluDVSearchConjunctions(q string) string {
@@ -418,7 +442,7 @@ func replaceBluDVSeasonEpisodeWithSeason(q string, re *regexp.Regexp) string {
 // in titleConfirmedDetails (keyed by post URL) and only need the season check,
 // as their localized title never matches a query in the original language.
 func filterBluDVSeasonResults(q string, torrents []schema.IndexedTorrent, titleConfirmedDetails map[string]bool) []schema.IndexedTorrent {
-	requestedSeason := extractBluDVSeason(q)
+	requestedSeason := extractBluDVRequestedSeason(q)
 	if requestedSeason == "" {
 		return torrents
 	}
@@ -437,6 +461,26 @@ func filterBluDVSeasonResults(q string, torrents []schema.IndexedTorrent, titleC
 	}
 
 	return filtered
+}
+
+// bludvRequestedSeasonREs read the season of a search, most explicit form
+// first. extractBluDVSeason, made for release titles, also takes a bare
+// "N temporada", which in a search reads the "2" of "ranma1 2 temporada 3" as
+// season 2; a search only gets that form with the ordinal marker ("3ª").
+var bludvRequestedSeasonREs = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\btemporada\s+0*([0-9]{1,3})\b`),
+	regexp.MustCompile(`(?i)\bs0*([0-9]{1,3})(?:[\s._-]*e0*[0-9]{1,3})?\b`),
+	regexp.MustCompile(`(?i)\b0*([0-9]{1,3})\s*(?:ª|º|a|o)\s*temporada\b`),
+}
+
+// extractBluDVRequestedSeason returns the season a search asks for, or "".
+func extractBluDVRequestedSeason(q string) string {
+	for _, re := range bludvRequestedSeasonREs {
+		if matches := re.FindStringSubmatch(q); matches != nil {
+			return normalizeBluDVSeasonNumber(matches[1])
+		}
+	}
+	return ""
 }
 
 func extractBluDVSeason(text string) string {
@@ -547,7 +591,20 @@ func matchesBluDVRequestedTitle(q, title string) bool {
 	if len(requestedTokens) == 0 {
 		return true
 	}
+	if matchesBluDVRequestedTokens(requestedTokens, title) {
+		return true
+	}
 
+	// Sonarr appends the year a show started to tell remakes apart ("Ranma½
+	// (2024)"), which the post of a later season does not repeat.
+	if last := len(requestedTokens) - 1; last > 0 && bludvYearTokenRE.MatchString(requestedTokens[last]) {
+		return matchesBluDVRequestedTokens(requestedTokens[:last], title)
+	}
+
+	return false
+}
+
+func matchesBluDVRequestedTokens(requestedTokens []string, title string) bool {
 	// Exact token match (e.g. "rick e morty" == "Rick e Morty ... Temporada").
 	if bludvTokensEqual(bludvReleaseTitleTokens(title), requestedTokens) {
 		return true
@@ -609,6 +666,8 @@ func bludvReleaseTitleTokens(title string) []string {
 func bludvComparableTokens(text string) []string {
 	normalized := normalizeBluDVComparableText(text)
 	normalized = bludvNonWordRE.ReplaceAllString(normalized, " ")
+	// "Ranma1/2" and "Ranma 1/2" name the same show
+	normalized = bludvLetterDigitRE.ReplaceAllString(normalized, "$1 $2")
 
 	var tokens []string
 	for _, token := range strings.Fields(normalized) {
@@ -934,6 +993,83 @@ func extractBluDVMagnetLinks(ctx context.Context, i *Indexer, content *goquery.S
 	return links
 }
 
+// bludvGateHrefRE matches the download links of the newer posts. The gate is a
+// link locker: it only releases the magnet after a visit to an advertiser's
+// site, so it is never followed. The same post, read through the site's own
+// WordPress REST API, still carries the plain magnets.
+var bludvGateHrefRE = regexp.MustCompile(`/gate/go/[0-9a-fA-F]+\?(?:[^"'\s]*&)?p=(\d+)`)
+
+func hasBluDVGateLinks(content *goquery.Selection) bool {
+	found := false
+	content.Find("a[href]").EachWithBreak(func(_ int, s *goquery.Selection) bool {
+		found = bludvGateHrefRE.MatchString(s.AttrOr("href", ""))
+		return !found
+	})
+	return found
+}
+
+// bludvPostAPIURL returns the WordPress REST URL of the post, limited to its
+// content: from the page's own <link rel="alternate" type="application/json">
+// when present, otherwise from the post id the gate links carry.
+func bludvPostAPIURL(doc *goquery.Document, content *goquery.Selection) string {
+	apiURL := strings.TrimSpace(doc.Find(`link[rel="alternate"][type="application/json"]`).AttrOr("href", ""))
+	if !strings.Contains(apiURL, "/wp-json/wp/v2/posts/") {
+		apiURL = ""
+		content.Find("a[href]").EachWithBreak(func(_ int, s *goquery.Selection) bool {
+			if m := bludvGateHrefRE.FindStringSubmatch(s.AttrOr("href", "")); m != nil {
+				apiURL = fmt.Sprintf("%swp-json/wp/v2/posts/%s", bludv.URL, m[1])
+				return false
+			}
+			return true
+		})
+	}
+	if apiURL == "" {
+		return ""
+	}
+
+	sep := "?"
+	if strings.Contains(apiURL, "?") {
+		sep = "&"
+	}
+	return apiURL + sep + "_fields=content"
+}
+
+// extractBluDVMagnetLinksFromAPI reads the download links of a post whose page
+// only shows gate links, from the post content served by the WordPress REST
+// API, where the magnets are still plain.
+func extractBluDVMagnetLinksFromAPI(ctx context.Context, i *Indexer, doc *goquery.Document, content *goquery.Selection, link string) []bludvMagnetLink {
+	apiURL := bludvPostAPIURL(doc, content)
+	if apiURL == "" {
+		logging.Warn().Str("url", link).Msg("BLUDV post only has gate links and no post id to read it from the API")
+		return nil
+	}
+
+	body, err := i.requester.GetJSON(ctx, apiURL, link)
+	if err != nil {
+		logging.Warn().Err(err).Str("url", link).Str("api_url", apiURL).Msg("Failed to read BLUDV post from the WordPress API")
+		return nil
+	}
+
+	var post struct {
+		Content struct {
+			Rendered string `json:"rendered"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(body, &post); err != nil {
+		logging.Warn().Err(err).Str("api_url", apiURL).Msg("Failed to decode BLUDV post from the WordPress API")
+		return nil
+	}
+
+	apiDoc, err := goquery.NewDocumentFromReader(strings.NewReader(post.Content.Rendered))
+	if err != nil {
+		return nil
+	}
+
+	links := extractBluDVMagnetLinks(ctx, i, apiDoc.Find("body"), link)
+	logging.Debug().Str("url", link).Int("magnets", len(links)).Msg("Read BLUDV download links from the WordPress API")
+	return links
+}
+
 func isBluDVDownloadHref(href string) bool {
 	return strings.HasPrefix(href, "magnet:") ||
 		bludvSystemAdsHrefRE.MatchString(href) ||
@@ -1011,6 +1147,9 @@ func getTorrentsBluDV(ctx context.Context, i *Indexer, link, referer string) ([]
 	textContent := article.Find("div.content")
 	date := getPublishedDate(doc)
 	magnetLinks := extractBluDVMagnetLinks(ctx, i, textContent, link)
+	if len(magnetLinks) == 0 && hasBluDVGateLinks(textContent) {
+		magnetLinks = extractBluDVMagnetLinksFromAPI(ctx, i, doc, textContent, link)
+	}
 
 	var audio []schema.Audio
 	var year string
