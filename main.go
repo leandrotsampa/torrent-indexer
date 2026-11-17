@@ -41,6 +41,11 @@ func main() {
 			metadataConfig.MaxPeers = t
 		}
 	}
+	if v := os.Getenv("MAGNET_METADATA_FAILURE_COOLDOWN_MINUTES"); v != "" {
+		if t, err := strconv.Atoi(v); err == nil {
+			metadataConfig.FailureCooldown = time.Duration(t) * time.Minute
+		}
+	}
 	magnetMetadata := magnet.NewResolver(metadataConfig, redis)
 	metrics := monitoring.NewMetrics()
 	metrics.Register()

@@ -58,9 +58,10 @@ func getDocument(ctx context.Context, i *Indexer, link, referer string) (*goquer
 }
 
 // magnetMetadataInlineTimeoutDefault bounds how long a search waits for the
-// metadata lookup (size/name), which resolves the torrent through the DHT and is
-// therefore unpredictable. Slower lookups are finished in the background by
-// warmMagnetMetadata, so the next search is served from cache.
+// metadata lookup (size/name), which resolves the torrent through the swarm and
+// is therefore unpredictable. The lookup itself keeps running after the search
+// gives up on it (see magnet.Resolver.FetchMetadata), so the next search is
+// served from cache.
 const magnetMetadataInlineTimeoutDefault = 3 * time.Second
 
 func magnetMetadataInlineTimeout() time.Duration {
@@ -72,10 +73,11 @@ func magnetMetadataInlineTimeout() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-// warmMagnetMetadata resolves the magnet metadata outside of the request
-// lifetime. The lookup can outlive the response, and ctx is cancelled as soon as
-// the handler returns, so it is detached to actually reach the cache instead of
-// being killed halfway — see FullfilMissingMetadata, which reads that cache.
+// warmMagnetMetadata starts resolving the magnet metadata while the indexer is
+// still parsing, so FullfilMissingMetadata finds it cached or joins the same
+// lookup instead of starting another. The resolver logs the outcome once per
+// lookup, so failures are not logged here — every caller sharing a lookup
+// would repeat it.
 func warmMagnetMetadata(ctx context.Context, i *Indexer, magnetLink string) {
 	if !i.magnetMetadataAPI.IsEnabled() {
 		return
@@ -83,9 +85,7 @@ func warmMagnetMetadata(ctx context.Context, i *Indexer, magnetLink string) {
 
 	detachedCtx := context.WithoutCancel(ctx)
 	go func() {
-		if _, err := i.magnetMetadataAPI.FetchMetadata(detachedCtx, magnetLink); err != nil {
-			logging.Debug().Err(err).Str("magnet_link", magnetLink).Msg("Failed to warm up magnet metadata cache")
-		}
+		_, _ = i.magnetMetadataAPI.FetchMetadata(detachedCtx, magnetLink)
 	}()
 }
 

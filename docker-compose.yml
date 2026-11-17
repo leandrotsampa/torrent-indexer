@@ -22,6 +22,7 @@ services:
       # - MAGNET_METADATA_ENABLED=true
       # - MAGNET_METADATA_PEER_TIMEOUT_SECONDS=5
       # - MAGNET_METADATA_MAX_PEERS=30
+      # - MAGNET_METADATA_FAILURE_COOLDOWN_MINUTES=30
   
   redis:
     image: redis:alpine

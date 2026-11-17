@@ -81,11 +81,10 @@ func FullfilMissingMetadata(i *Indexer, r *http.Request, torrents []schema.Index
 		ctx, cancel := context.WithTimeout(r.Context(), magnetMetadataInlineTimeout())
 		defer cancel()
 
+		// On timeout the lookup keeps running in the resolver and caches its
+		// result, so there is nothing to restart here.
 		m, err := i.magnetMetadataAPI.FetchMetadata(ctx, it.MagnetLink)
 		if err != nil {
-			// Finish the lookup in the background so the next search is served
-			// from cache instead of paying for it again.
-			warmMagnetMetadata(r.Context(), i, it.MagnetLink)
 			return []schema.IndexedTorrent{it}, nil
 		}
 
@@ -96,7 +95,7 @@ func FullfilMissingMetadata(i *Indexer, r *http.Request, torrents []schema.Index
 		if m.Name != "" {
 			it.Title = m.Name
 		}
-		logging.Debug().Str("info_hash", m.InfoHash).Str("size", it.Size).Msg("Retrieved metadata from MagnetMetadataAPI")
+		logging.Debug().Str("info_hash", m.InfoHash).Str("size", it.Size).Msg("Filled in torrent metadata")
 
 		// If files are present, add them to the indexed torrent
 		if len(m.Files) > 0 {
