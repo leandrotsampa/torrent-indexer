@@ -108,12 +108,23 @@ func (s *clearanceStore) saveSolved(rawURL, userAgent string, cookies []solvedCo
 
 	var pairs []string
 	for _, c := range cookies {
+		if !isCloudflareCookie(c.Name) {
+			continue
+		}
 		cookieDomain := strings.TrimPrefix(strings.ToLower(c.Domain), ".")
 		if cookieDomain == "" || domain == cookieDomain || strings.HasSuffix(domain, "."+cookieDomain) || strings.HasSuffix(cookieDomain, "."+domain) {
 			pairs = append(pairs, c.Name+"="+c.Value)
 		}
 	}
 	s.save(domain, strings.Join(pairs, "; "), userAgent, expires)
+}
+
+// isCloudflareCookie reports whether name is one of Cloudflare's own cookies
+// (cf_clearance, __cf_bm, _cfuvid...). Only those are replayed: the site's
+// cookies (a PHP session, say) belong to the solver's browser, and replaying
+// them on every request would mix the state of unrelated requests.
+func isCloudflareCookie(name string) bool {
+	return name == "cf_clearance" || strings.HasPrefix(name, "__cf") || strings.HasPrefix(name, "_cf")
 }
 
 // isCloudflareChallenge reports whether resp is a Cloudflare challenge: the

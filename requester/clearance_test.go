@@ -42,6 +42,23 @@ func TestClearanceStoreLookup(t *testing.T) {
 	}
 }
 
+// Only Cloudflare's cookies are replayed: the site's own session belongs to
+// the solver's browser (replaying it made every vaca link resolve to the
+// magnet of the first one).
+func TestClearanceStoreKeepsOnlyCloudflareCookies(t *testing.T) {
+	s := newClearanceStore()
+	s.saveSolved("https://vaqueirofilmes.com/enc/go.php?id=1", "UA/1", []solvedCookie{
+		{Name: "PHPSESSID", Value: "solver", Domain: "vaqueirofilmes.com"},
+		{Name: "cf_clearance", Value: "ok", Domain: ".vaqueirofilmes.com"},
+		{Name: "__cf_bm", Value: "bm", Domain: ".vaqueirofilmes.com"},
+		{Name: "ads", Value: "x", Domain: ".adnetwork.example"},
+	})
+	c, ok := s.lookup("vaqueirofilmes.com")
+	if !ok || c.cookies != "cf_clearance=ok; __cf_bm=bm" {
+		t.Errorf("cookies = %q, %v; want only the Cloudflare ones", c.cookies, ok)
+	}
+}
+
 // fakeCloudflareSite answers like a Cloudflare-protected site: a challenge
 // unless the request carries the clearance cookie and the user agent it was
 // issued to.
@@ -108,6 +125,7 @@ func newFakeByparr(t *testing.T, host string, solves *int32) *httptest.Server {
 				"cookies": []map[string]interface{}{
 					{"name": "cf_clearance", "value": "ok", "domain": "." + host, "path": "/"},
 					{"name": "ads", "value": "x", "domain": ".adnetwork.example", "path": "/"},
+					{"name": "PHPSESSID", "value": "solver-session", "domain": host, "path": "/"},
 				},
 			},
 		})

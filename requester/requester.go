@@ -32,9 +32,12 @@ const (
 var challangeRegex = regexp.MustCompile(`(?i)(just a moment|cf-chl-bypass|under attack|cf-mitigated)`)
 
 type Requster struct {
-	fs                        *FlareSolverr
-	c                         *cache.Redis
-	httpClient                *http.Client
+	fs         *FlareSolverr
+	c          *cache.Redis
+	httpClient *http.Client
+	// postClient is httpClient with room for the slow search endpoints sites
+	// answer through POST (vaca's admin-ajax takes 4-15s).
+	postClient                *http.Client
 	shortLivedCacheExpiration time.Duration
 	// siteLocks serializes the FlareSolverr solves of each site (host ->
 	// chan struct{}): one request solves, the others reuse its clearance.
@@ -54,8 +57,14 @@ func NewRequester(fs *FlareSolverr, c *cache.Redis, timeout time.Duration) *Requ
 		},
 	}
 
-	return &Requster{fs: fs, httpClient: httpClient, c: c, shortLivedCacheExpiration: 30 * time.Minute}
+	postClient := &http.Client{Timeout: max(timeout, minPostFormTimeout), Transport: httpClient.Transport}
+
+	return &Requster{fs: fs, httpClient: httpClient, postClient: postClient, c: c, shortLivedCacheExpiration: 30 * time.Minute}
 }
+
+// minPostFormTimeout is the least PostForm waits: a POST is a site's search
+// endpoint, and those run a database query instead of serving a cached page.
+const minPostFormTimeout = 30 * time.Second
 
 func (i *Requster) SetShortLivedCacheExpiration(expiration time.Duration) {
 	i.shortLivedCacheExpiration = expiration
@@ -208,7 +217,7 @@ func (i *Requster) PostForm(ctx context.Context, url string, form neturl.Values,
 	req.Header.Del("Upgrade-Insecure-Requests")
 	cleared := i.applyClearance(req, url)
 
-	resp, err := i.httpClient.Do(req)
+	resp, err := i.postClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to do POST request for url %s: %w", url, err)
 	}
