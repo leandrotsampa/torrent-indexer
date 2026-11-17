@@ -93,22 +93,14 @@ func (i *Indexer) HandlerDarkmahouIndexer(w http.ResponseWriter, r *http.Request
 	logging.InfoWithRequest(r).Str("target_url", targetURL).Msg("Processing indexer request")
 	resp, err := i.requester.GetDocument(ctx, targetURL)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		if err = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
-			logging.ErrorWithRequest(r).Err(err).Msg("Failed to encode error response")
-		}
-		i.metrics.IndexerErrors.WithLabelValues(metadata.Label).Inc()
+		writeIndexerError(w, r, i, metadata.Label, err)
 		return
 	}
 	defer resp.Close()
 
 	doc, err := goquery.NewDocumentFromReader(resp)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		if err = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); err != nil {
-			logging.ErrorWithRequest(r).Err(err).Msg("Failed to encode error response")
-		}
-		i.metrics.IndexerErrors.WithLabelValues(metadata.Label).Inc()
+		writeIndexerError(w, r, i, metadata.Label, err)
 		return
 	}
 

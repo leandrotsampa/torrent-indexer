@@ -91,12 +91,7 @@ func (i *Indexer) HandlerEraiRawsIndexer(w http.ResponseWriter, r *http.Request)
 	logging.InfoWithRequest(r).Str("target_url", targetURL).Msg("Processing indexer request")
 	torrents, err := getEraiRawsTorrents(ctx, i, targetURL, metadata.URL)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		err = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		if err != nil {
-			logging.ErrorWithRequest(r).Err(err).Msg("Failed to encode error response")
-		}
-		i.metrics.IndexerErrors.WithLabelValues(metadata.Label).Inc()
+		writeIndexerError(w, r, i, metadata.Label, err)
 		return
 	}
 

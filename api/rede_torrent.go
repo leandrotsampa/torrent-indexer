@@ -67,25 +67,14 @@ func (i *Indexer) HandlerRedeTorrentIndexer(w http.ResponseWriter, r *http.Reque
 	logging.InfoWithRequest(r).Str("target_url", url).Msg("Processing indexer request")
 	resp, err := i.requester.GetDocument(ctx, url)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		err = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		if err != nil {
-			logging.ErrorWithRequest(r).Err(err).Msg("Failed to encode error response")
-		}
-		i.metrics.IndexerErrors.WithLabelValues(metadata.Label).Inc()
+		writeIndexerError(w, r, i, metadata.Label, err)
 		return
 	}
 	defer resp.Close()
 
 	doc, err := goquery.NewDocumentFromReader(resp)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		err = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		if err != nil {
-			logging.ErrorWithRequest(r).Err(err).Msg("Failed to encode error response")
-		}
-
-		i.metrics.IndexerErrors.WithLabelValues(metadata.Label).Inc()
+		writeIndexerError(w, r, i, metadata.Label, err)
 		return
 	}
 

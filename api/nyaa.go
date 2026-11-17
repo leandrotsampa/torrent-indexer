@@ -83,11 +83,7 @@ func (i *Indexer) HandlerNyaaIndexer(w http.ResponseWriter, r *http.Request) {
 	logging.InfoWithRequest(r).Str("query", q).Str("page", page).Msg("Processing indexer request")
 	torrents, err := getNyaaTorrents(ctx, i, nyaaMirrors(metadata.URL), q, page)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		if encodeErr := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); encodeErr != nil {
-			logging.ErrorWithRequest(r).Err(encodeErr).Msg("Failed to encode error response")
-		}
-		i.metrics.IndexerErrors.WithLabelValues(metadata.Label).Inc()
+		writeIndexerError(w, r, i, metadata.Label, err)
 		return
 	}
 

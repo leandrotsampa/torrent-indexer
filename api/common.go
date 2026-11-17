@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"net/http"
 	"net/url"
 	"regexp"
 	"slices"
@@ -19,6 +20,19 @@ import (
 	"github.com/leandrotsampa/torrent-indexer/schema"
 	"github.com/leandrotsampa/torrent-indexer/utils"
 )
+
+// writeIndexerError answers an indexer request that failed with a 500 carrying
+// the error. The error is also logged: the response only reaches the client
+// (Prowlarr), so without this a failing indexer leaves no trace of the cause.
+func writeIndexerError(w http.ResponseWriter, r *http.Request, i *Indexer, label string, err error) {
+	logging.ErrorWithRequest(r).Err(err).Str("indexer", label).Msg("Indexer request failed")
+
+	w.WriteHeader(http.StatusInternalServerError)
+	if encodeErr := json.NewEncoder(w).Encode(map[string]string{"error": err.Error()}); encodeErr != nil {
+		logging.ErrorWithRequest(r).Err(encodeErr).Msg("Failed to encode error response")
+	}
+	i.metrics.IndexerErrors.WithLabelValues(label).Inc()
+}
 
 // getDocument retrieves a document from the cache or makes a request to get it.
 // It first checks the Redis cache for the document body.

@@ -73,12 +73,7 @@ func (i *Indexer) HandlerVacaTorrentIndexer(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		err = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		if err != nil {
-			logging.ErrorWithRequest(r).Err(err).Msg("Failed to encode error response")
-		}
-		i.metrics.IndexerErrors.WithLabelValues(metadata.Label).Inc()
+		writeIndexerError(w, r, i, metadata.Label, err)
 		return
 	}
 
