@@ -3,6 +3,7 @@ package requester
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -255,6 +256,143 @@ func (i *Requster) PostForm(ctx context.Context, url string, form neturl.Values,
 		}
 	}
 	return bodyByte, nil
+}
+
+// GetJSON fetches a JSON resource (e.g. a WordPress REST endpoint) with the
+// plain client and the site's Cloudflare clearance. FlareSolverr's answer is
+// the browser-rendered page, which mangles JSON, so a challenge is only solved
+// to obtain a fresh clearance, and the resource is then fetched again with it.
+// Successful answers are kept in the short-lived cache.
+func (i *Requster) GetJSON(ctx context.Context, url, referer string) ([]byte, error) {
+	key := fmt.Sprintf("%s:JSON:%s", cacheKey, url)
+	if bodyByte, err := i.c.Get(ctx, key); err == nil {
+		logging.Debug().Str("url", url).Msg("Returning JSON from short-lived cache")
+		return bodyByte, nil
+	}
+
+	// like GetDocument, a network error or a 403/429/5xx gets a few more tries:
+	// these sites are slow and answer the same client inconsistently
+	var bodyByte []byte
+	var challenged bool
+	var err error
+	for attempt := 0; ; attempt++ {
+		bodyByte, challenged, err = i.getJSONWithClearance(ctx, url, referer)
+		if err == nil || challenged || attempt == maxPlainRetries || !isRetryableJSONError(err) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * time.Second):
+		}
+	}
+	if challenged {
+		bodyByte, err = i.getJSONAfterSolve(ctx, url, referer)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if err := i.c.SetWithExpiration(ctx, key, bodyByte, i.shortLivedCacheExpiration); err != nil {
+		logging.Error().Err(err).Str("url", url).Msg("Failed to save JSON response to cache")
+	}
+	return bodyByte, nil
+}
+
+// getJSONAfterSolve gets a clearance for url's site and fetches url again with
+// it. It holds the site's solve lock, so a burst of requests costs one solve:
+// the ones that waited first try the clearance the solve left.
+func (i *Requster) getJSONAfterSolve(ctx context.Context, url, referer string) ([]byte, error) {
+	release, err := i.lockSite(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	bodyByte, challenged, err := i.getJSONWithClearance(ctx, url, referer)
+	if !challenged {
+		return bodyByte, err
+	}
+
+	solved, err := i.fs.Get(ctx, url, 3)
+	if err != nil {
+		return nil, fmt.Errorf("failed to solve the challenge for url %s: %w", url, err)
+	}
+	_ = solved.Close()
+
+	bodyByte, challenged, err = i.getJSONWithClearance(ctx, url, referer)
+	if challenged {
+		return nil, fmt.Errorf("url %s is still challenged after a solve", url)
+	}
+	return bodyByte, err
+}
+
+// getJSONWithClearance fetches url once with the plain client and the site's
+// clearance, if any. challenged reports a Cloudflare challenge, in which case a
+// clearance that was sent is dropped.
+func (i *Requster) getJSONWithClearance(ctx context.Context, url, referer string) (bodyByte []byte, challenged bool, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to create request for url %s: %w", url, err)
+	}
+	spoofBrowserHeaders(req, referer)
+	req.Header.Set("Accept", "application/json, */*; q=0.01")
+	cleared := i.applyClearance(req, url)
+
+	resp, err := i.httpClient.Do(req)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to do request for url %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	if isCloudflareChallenge(resp) {
+		if cleared {
+			i.fs.dropClearance(url)
+		}
+		return nil, true, nil
+	}
+
+	body, err := httpdecompressor.Reader(resp)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to decompress response: %w", err)
+	}
+	defer body.Close()
+
+	bodyByte, err = io.ReadAll(body)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to read response body: %w", err)
+	}
+	if hasChallange(bodyByte) {
+		if cleared {
+			i.fs.dropClearance(url)
+		}
+		return nil, true, nil
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, false, &httpStatusError{status: resp.StatusCode, url: url}
+	}
+	return bodyByte, false, nil
+}
+
+// httpStatusError is a non-2xx answer from the site itself.
+type httpStatusError struct {
+	status int
+	url    string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("site answered HTTP %d for url %s", e.status, e.url)
+}
+
+// isRetryableJSONError reports whether a failed GetJSON attempt is worth
+// repeating: network errors are, and so are the statuses isRetryableStatus
+// lists; any other answer (e.g. a 404) is final.
+func isRetryableJSONError(err error) bool {
+	var statusErr *httpStatusError
+	if errors.As(err, &statusErr) {
+		return isRetryableStatus(statusErr.status)
+	}
+	return true
 }
 
 // ExpirePostForm removes a cached PostForm response.

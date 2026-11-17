@@ -320,3 +320,72 @@ func TestGetDocumentSolvesChallengedServerErrors(t *testing.T) {
 		t.Errorf("solves = %d, want 1", solves)
 	}
 }
+
+func TestGetJSONSolvesOnlyForTheClearance(t *testing.T) {
+	site := newFakeCloudflareSite(t)
+	host := strings.Split(strings.TrimPrefix(site.server.URL, "http://"), ":")[0]
+	var solves int32
+	r := newTestRequester(t, newFakeByparr(t, host, &solves).URL)
+
+	// challenged at first: one solve for the clearance, then the plain client
+	// fetches the real resource — never the solver's rendered page
+	body, err := r.GetJSON(t.Context(), site.server.URL+"/wp-json/wp/v2/posts/1", "")
+	if err != nil {
+		t.Fatalf("GetJSON() error = %v", err)
+	}
+	if got := string(body); !strings.Contains(got, "page /wp-json/wp/v2/posts/1") {
+		t.Fatalf("GetJSON() = %q, want the site's own answer", got)
+	}
+	if solves != 1 {
+		t.Errorf("solves = %d, want 1", solves)
+	}
+
+	// the clearance is reused by the next resource of the same site
+	if _, err := r.GetJSON(t.Context(), site.server.URL+"/wp-json/wp/v2/posts/2", ""); err != nil {
+		t.Fatalf("second GetJSON() error = %v", err)
+	}
+	if solves != 1 {
+		t.Errorf("solves = %d after reusing the clearance, want 1", solves)
+	}
+}
+
+func TestGetJSONRetriesTransientFailures(t *testing.T) {
+	var hits int32
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/missing" {
+			atomic.AddInt32(&hits, 1)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// a slow site failing the first answers
+		if atomic.AddInt32(&hits, 1) <= int32(maxPlainRetries) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = io.WriteString(w, `{"content":{"rendered":"ok"}}`)
+	}))
+	t.Cleanup(site.Close)
+
+	var solves int32
+	r := newTestRequester(t, newFakeByparr(t, "127.0.0.1", &solves).URL)
+
+	body, err := r.GetJSON(t.Context(), site.URL+"/post", "")
+	if err != nil {
+		t.Fatalf("GetJSON() error = %v", err)
+	}
+	if !strings.Contains(string(body), `"ok"`) {
+		t.Fatalf("GetJSON() = %q", body)
+	}
+	if solves != 0 {
+		t.Errorf("solves = %d, want 0", solves)
+	}
+
+	// a final answer is not repeated
+	atomic.StoreInt32(&hits, 0)
+	if _, err := r.GetJSON(t.Context(), site.URL+"/missing", ""); err == nil || !strings.Contains(err.Error(), "HTTP 404") {
+		t.Fatalf("GetJSON(missing) error = %v, want the site's HTTP 404", err)
+	}
+	if hits != 1 {
+		t.Errorf("attempts on a 404 = %d, want 1", hits)
+	}
+}
