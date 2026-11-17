@@ -69,7 +69,11 @@ var (
 	bludvResolutionRE          = regexp.MustCompile(`(?i)\b(?:480p|720p|1080p|2160p|4k)\b`)
 	bludvNonWordRE             = regexp.MustCompile(`[^a-z0-9]+`)
 	bludvLetterDigitRE         = regexp.MustCompile(`([a-z])([0-9])`)
-	bludvDigitSeparatorRE      = regexp.MustCompile(`([0-9])\s*[_/-]\s*([0-9])`)
+	bludvDigitSeparatorRE      = regexp.MustCompile(`([0-9])\s*(?:[_/&-]|\be\b|\band\b)\s*([0-9])`)
+	bludvParenthesizedYearRE   = regexp.MustCompile(`\(\s*(?:19|20)[0-9]{2}\s*\)`)
+	bludvYearBeforeEpisodeRE   = regexp.MustCompile(`\b(?:19|20)[0-9]{2}\s+([0-9]{1,4})\s*$`)
+	bludvOrdinalSeasonRE       = regexp.MustCompile(`(?i)\b0*([0-9]{1,3})(?:st|nd|rd|th)\s+season\b|\bseason\s+0*([0-9]{1,3})\b`)
+	bludvSeasonThenEpisodeRE   = regexp.MustCompile(`(?i)(\btemporada\s+[0-9]{1,3})\s+[0-9]{1,4}\s*$`)
 	bludvYearQueryRE           = regexp.MustCompile(`\(?\b(?:19|20)[0-9]{2}\b\)?`)
 	bludvYearTokenRE           = regexp.MustCompile(`^(?:19|20)[0-9]{2}$`)
 	bludvAnchorRE              = regexp.MustCompile(`(?is)<a(?:\s[^>]*?)?\shref\s*=\s*["']([^"']*)["'][^>]*>(.*?)</a>`)
@@ -165,7 +169,9 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	// supported query params: q, season, episode, page, filter_results
-	rawQ := r.URL.Query().Get("q")
+	// the season and title checks below read the request too, so they get the
+	// season spelled the way they know it ("3rd Season 06" → "temporada 3")
+	rawQ := canonicalizeBluDVRequest(r.URL.Query().Get("q"))
 	q := normalizeBluDVSearchQuery(rawQ)
 	page := r.URL.Query().Get("page")
 	requestedSeason := extractBluDVRequestedSeason(rawQ)
@@ -399,26 +405,53 @@ func normalizeBluDVSearchQuery(q string) string {
 		return q
 	}
 
+	q = canonicalizeBluDVRequest(q)
 	q = replaceBluDVSeasonEpisodeWithSeason(q, bludvSeasonEpisodeQueryRE)
 	q = replaceBluDVSeasonEpisodeWithSeason(q, bludvTemporadaEpisodeRE)
 	q = replaceBluDVSeasonEpisodeWithSeason(q, bludvSeasonOnlyTokenRE)
+	// "S03 06" only became "temporada 3 06" above
+	q = bludvSeasonThenEpisodeRE.ReplaceAllString(q, "$1")
 	q = normalizeBluDVSearchConjunctions(q)
+	q = simplifyBluDVTitleNumbers(q)
 	if extractBluDVRequestedSeason(q) != "" {
-		q = simplifyBluDVSeasonSearch(q)
+		q = bludvYearQueryRE.ReplaceAllString(q, " ")
 	}
 
 	return strings.Join(strings.Fields(q), " ")
 }
 
-// simplifyBluDVSeasonSearch drops from a season search what makes the site's
-// search miss the post. Every word must appear in the post, so the year Sonarr
-// appends to the series name ("Ranma½ (2024)") only finds the first season's
-// post, and "½" or "1_2" never match a title written "Ranma1/2", while "1 2"
-// does. Which post is the right one is still decided by the title check.
-func simplifyBluDVSeasonSearch(q string) string {
+// canonicalizeBluDVRequest rewrites the season forms of a request the rest of
+// the indexer does not know. Sonarr searches anime by absolute episode, with
+// the season spelled the way an alias names it: "Ranma 1/2 (2024) 3rd Season
+// 06". The ordinal becomes "temporada 3", and the episode number after it is
+// dropped: a season search returns the whole season, and Sonarr picks the
+// episode from the release titles.
+func canonicalizeBluDVRequest(q string) string {
+	q = bludvOrdinalSeasonRE.ReplaceAllStringFunc(q, func(match string) string {
+		parts := bludvOrdinalSeasonRE.FindStringSubmatch(match)
+		season := parts[1]
+		if season == "" {
+			season = parts[2]
+		}
+		return "temporada " + normalizeBluDVSeasonNumber(season)
+	})
+	return bludvSeasonThenEpisodeRE.ReplaceAllString(q, "$1")
+}
+
+// simplifyBluDVTitleNumbers drops from a search what makes the site's search
+// miss the post: every word must appear in the post, and "½", "1_2" or "1 & 2"
+// never match a title written "Ranma1/2", while "1 2" does. The year Sonarr
+// adds in parentheses to tell a remake apart ("Ranma½ (2024)") goes too: the
+// posts of later seasons carry their own year. Season searches drop a bare
+// year as well (see normalizeBluDVSearchQuery). Which post is the right one is
+// still decided by the title check.
+func simplifyBluDVTitleNumbers(q string) string {
 	q = strings.ReplaceAll(q, "½", " 1 2 ")
 	q = bludvDigitSeparatorRE.ReplaceAllString(q, "$1 $2")
-	q = bludvYearQueryRE.ReplaceAllString(q, " ")
+	q = bludvParenthesizedYearRE.ReplaceAllString(q, " ")
+	// "Title 2024 06" is an anime search by absolute episode: the year names
+	// the series, not the post, which only the first season's post repeats
+	q = bludvYearBeforeEpisodeRE.ReplaceAllString(q, " $1")
 	return q
 }
 
@@ -680,7 +713,34 @@ func bludvComparableTokens(text string) []string {
 		tokens = append(tokens, token)
 	}
 
-	return tokens
+	return dropBluDVConjunctionsBetweenNumbers(tokens)
+}
+
+// dropBluDVConjunctionsBetweenNumbers drops "and" between two numbers: the
+// aliases spell "Ranma1/2" as "Ranma1 & 2" or "Ranma1 e 2", where it joins the
+// two halves of a fraction, not two titles.
+func dropBluDVConjunctionsBetweenNumbers(tokens []string) []string {
+	kept := tokens[:0:0]
+	for idx, token := range tokens {
+		if token == "and" && idx > 0 && idx < len(tokens)-1 &&
+			isBluDVNumberToken(tokens[idx-1]) && isBluDVNumberToken(tokens[idx+1]) {
+			continue
+		}
+		kept = append(kept, token)
+	}
+	return kept
+}
+
+func isBluDVNumberToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	for _, r := range token {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func isBluDVConjunctionToken(token string) bool {

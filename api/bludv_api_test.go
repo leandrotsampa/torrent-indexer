@@ -128,9 +128,21 @@ func TestNormalizeBluDVSearchQuerySimplifiesSeasonSearches(t *testing.T) {
 		"Ranma½ (2024) S03E06":       "Ranma 1 2 temporada 3",
 		"ranma 1_2 (2024) S03E06":    "ranma 1 2 temporada 3",
 		"ranma 1-2 2024 temporada 3": "ranma 1 2 temporada 3",
-		// searches without a season are left as they were
-		"Duna 2021":    "Duna 2021",
-		"ranma 1_2 06": "ranma 1_2 06",
+		// Sonarr's anime searches: absolute episode, season named by an alias;
+		// a season search returns the whole season, so the episode goes
+		"ranma 1/2 (2024) 3rd season 06": "ranma 1 2 temporada 3",
+		"Ranma 1/2 (2024) Season 3":      "Ranma 1 2 temporada 3",
+		"ranma1 & 2 temporada 3":         "ranma1 2 temporada 3",
+		"ranma1 e 2 temporada 3":         "ranma1 2 temporada 3",
+		// without a season: the fraction and the parenthesized year still go,
+		// a bare year stays (a movie search "Duna 2021" needs it)
+		"ranma 1_2 (2024) 06": "ranma 1 2 06",
+		"Ranma½ (2024) 06":    "Ranma 1 2 06",
+		"ranma 1_2 06":        "ranma 1 2 06",
+		"ranma 1-2 2024 06":   "ranma 1 2 06",
+		"ranma 2024 06":       "ranma 06",
+		"Duna 2021":           "Duna 2021",
+		"Duna (2021)":         "Duna",
 	}
 	for input, want := range cases {
 		if got := normalizeBluDVSearchQuery(input); got != want {
