@@ -197,7 +197,10 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 		matched, pending := filterBluDVSearchLinks(rawQ, requestedSeason, links)
 		pendingLinks := pending
 
-		for pageNum := 2; len(matched) == 0 && page == "" && pageNum <= bludvMaxSeasonSearchPages; pageNum++ {
+		// A page with no posts at all is the end of the results: the next one
+		// would only cost another trip to the site (~3s) to come back empty too.
+		pageHadPosts := len(links) > 0
+		for pageNum := 2; pageHadPosts && len(matched) == 0 && page == "" && pageNum <= bludvMaxSeasonSearchPages; pageNum++ {
 			nextURL := buildBluDVURL(metadata, q, fmt.Sprintf("%d", pageNum))
 			nextResp, err := i.requester.GetDocument(ctx, nextURL)
 			if err != nil {
@@ -212,7 +215,9 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			matched, pending = filterBluDVSearchLinks(rawQ, requestedSeason, extractBluDVSearchLinks(nextDoc))
+			nextLinks := extractBluDVSearchLinks(nextDoc)
+			pageHadPosts = len(nextLinks) > 0
+			matched, pending = filterBluDVSearchLinks(rawQ, requestedSeason, nextLinks)
 			pendingLinks = append(pendingLinks, pending...)
 		}
 
