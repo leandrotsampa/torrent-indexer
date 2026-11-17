@@ -52,6 +52,17 @@ func (r *Redis) SetWithExpiration(ctx context.Context, key string, value []byte,
 	return r.client.Set(ctx, key, value, expiration).Err()
 }
 
+// ShortenExpiration lowers key's time to live to expiration, never raising it:
+// a key read again and again keeps its original deadline instead of being
+// renewed by every read. It needs Redis 7 (EXPIRE ... LT); on an older server
+// the key is deleted instead, so it is never kept longer than asked.
+func (r *Redis) ShortenExpiration(ctx context.Context, key string, expiration time.Duration) error {
+	if err := r.client.ExpireLT(ctx, key, expiration).Err(); err != nil {
+		return r.client.Del(ctx, key).Err()
+	}
+	return nil
+}
+
 func (r *Redis) Del(ctx context.Context, key string) error {
 	return r.client.Del(ctx, key).Err()
 }

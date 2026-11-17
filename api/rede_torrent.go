@@ -81,9 +81,9 @@ func (i *Indexer) HandlerRedeTorrentIndexer(w http.ResponseWriter, r *http.Reque
 
 	links := extractRedeTorrentLinks(doc)
 
-	// if no links were indexed, expire the document in cache
+	// a successful search that indexed nothing stays cached only briefly
 	if len(links) == 0 {
-		_ = i.requester.ExpireDocument(ctx, url)
+		_ = i.requester.KeepEmptyDocumentBriefly(ctx, url)
 		logging.DebugWithRequest(r).Str("url", url).Msg("No links found, expiring cache")
 	}
 

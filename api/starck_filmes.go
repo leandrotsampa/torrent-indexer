@@ -83,9 +83,9 @@ func (i *Indexer) HandlerStarckFilmesIndexer(w http.ResponseWriter, r *http.Requ
 	})
 	links = utils.StableUniq(links)
 
-	// if no links were indexed, expire the document in cache
+	// a successful search that indexed nothing stays cached only briefly
 	if len(links) == 0 {
-		_ = i.requester.ExpireDocument(ctx, url)
+		_ = i.requester.KeepEmptyDocumentBriefly(ctx, url)
 		logging.DebugWithRequest(r).Str("url", url).Msg("No links found, expiring cache")
 	}
 

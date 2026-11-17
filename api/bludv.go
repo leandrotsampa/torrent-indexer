@@ -226,9 +226,9 @@ func (i *Indexer) HandlerBluDVIndexer(w http.ResponseWriter, r *http.Request) {
 	}
 	linkURLs := bludvSearchLinkURLs(links)
 
-	// if no links were indexed, expire the document in cache
+	// a successful search that indexed nothing stays cached only briefly
 	if len(linkURLs) == 0 {
-		_ = i.requester.ExpireDocument(ctx, targetURL)
+		_ = i.requester.KeepEmptyDocumentBriefly(ctx, targetURL)
 	}
 
 	// extract each torrent link

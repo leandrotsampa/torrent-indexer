@@ -84,9 +84,9 @@ func (i *Indexer) HandlerComandoIndexer(w http.ResponseWriter, r *http.Request) 
 		links = append(links, link)
 	})
 
-	// if no links were indexed, expire the document in cache
+	// a successful search that indexed nothing stays cached only briefly
 	if len(links) == 0 {
-		_ = i.requester.ExpireDocument(ctx, url)
+		_ = i.requester.KeepEmptyDocumentBriefly(ctx, url)
 	}
 
 	// extract each torrent link

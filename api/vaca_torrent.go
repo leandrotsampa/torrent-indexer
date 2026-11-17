@@ -215,9 +215,9 @@ func getVacaTorrentListingLinks(ctx context.Context, i *Indexer, targetURL strin
 	}
 
 	links := extractVacaTorrentLinks(doc)
-	// if no links were indexed, expire the document in cache
+	// a successful search that indexed nothing stays cached only briefly
 	if len(links) == 0 {
-		_ = i.requester.ExpireDocument(ctx, targetURL)
+		_ = i.requester.KeepEmptyDocumentBriefly(ctx, targetURL)
 	}
 	return links, nil
 }

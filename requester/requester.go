@@ -40,6 +40,9 @@ type Requster struct {
 	// answer through POST (vaca's admin-ajax takes 4-15s).
 	postClient                *http.Client
 	shortLivedCacheExpiration time.Duration
+	// emptyResultsCacheExpiration is how long a search page that indexed
+	// nothing stays cached; see KeepEmptyDocumentBriefly.
+	emptyResultsCacheExpiration time.Duration
 	// siteLocks serializes the FlareSolverr solves of each site (host ->
 	// chan struct{}): one request solves, the others reuse its clearance.
 	siteLocks sync.Map
@@ -60,7 +63,25 @@ func NewRequester(fs *FlareSolverr, c *cache.Redis, timeout time.Duration) *Requ
 
 	postClient := &http.Client{Timeout: max(timeout, minPostFormTimeout), Transport: httpClient.Transport}
 
-	return &Requster{fs: fs, httpClient: httpClient, postClient: postClient, c: c, shortLivedCacheExpiration: 30 * time.Minute}
+	return &Requster{
+		fs:                          fs,
+		httpClient:                  httpClient,
+		postClient:                  postClient,
+		c:                           c,
+		shortLivedCacheExpiration:   30 * time.Minute,
+		emptyResultsCacheExpiration: defaultEmptyResultsCacheExpiration,
+	}
+}
+
+// defaultEmptyResultsCacheExpiration keeps an empty search page long enough
+// to answer the burst of near-identical searches Sonarr sends for an episode,
+// and short enough for a newly published release to show up soon.
+const defaultEmptyResultsCacheExpiration = 5 * time.Minute
+
+// SetEmptyResultsCacheExpiration sets how long a search page that indexed
+// nothing stays cached.
+func (i *Requster) SetEmptyResultsCacheExpiration(expiration time.Duration) {
+	i.emptyResultsCacheExpiration = expiration
 }
 
 // minPostFormTimeout is the least PostForm waits: a POST is a site's search
@@ -402,6 +423,19 @@ func (i *Requster) ExpirePostForm(ctx context.Context, url string, form neturl.V
 
 func postFormCacheKey(url string, form neturl.Values) string {
 	return fmt.Sprintf("%s:POST:%s:%s", cacheKey, url, form.Encode())
+}
+
+// KeepEmptyDocumentBriefly is for a search page that indexed nothing: it stays
+// cached for emptyResultsCacheExpiration at most, instead of the full
+// short-lived expiration. Dropping it outright made every repetition of the
+// search go back to the site (13% of the requests in a Sonarr search burst),
+// while the search may simply have no results there.
+func (i *Requster) KeepEmptyDocumentBriefly(ctx context.Context, url string) error {
+	if i.emptyResultsCacheExpiration <= 0 {
+		return i.ExpireDocument(ctx, url)
+	}
+	key := fmt.Sprintf("%s:%s", cacheKey, url)
+	return i.c.ShortenExpiration(ctx, key, i.emptyResultsCacheExpiration)
 }
 
 func (i *Requster) ExpireDocument(ctx context.Context, url string) error {

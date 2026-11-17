@@ -81,6 +81,12 @@ func main() {
 		logging.Info().Dur("expiration", shortLivedCacheExpiration).Msg("Setting short-lived cache expiration")
 		req.SetShortLivedCacheExpiration(shortLivedCacheExpiration)
 	}
+	if v := os.Getenv("EMPTY_RESULTS_CACHE_EXPIRATION"); v != "" {
+		if emptyResultsCacheExpiration, err := str2duration.ParseDuration(v); err == nil {
+			logging.Info().Dur("expiration", emptyResultsCacheExpiration).Msg("Setting empty-results cache expiration")
+			req.SetEmptyResultsCacheExpiration(emptyResultsCacheExpiration)
+		}
+	}
 	longLivedCacheExpiration, err := str2duration.ParseDuration(os.Getenv("LONG_LIVED_CACHE_EXPIRATION"))
 	if err == nil {
 		logging.Info().Dur("expiration", longLivedCacheExpiration).Msg("Setting long-lived cache expiration")
