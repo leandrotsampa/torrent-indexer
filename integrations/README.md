@@ -132,8 +132,8 @@ Brazilian sites name things:
 
 ## Notes
 
-- Do **not** attach a FlareSolverr proxy/tag to these indexers in Prowlarr:
-  torrent-indexer talks to FlareSolverr itself through `FLARESOLVERR_ADDRESS`, and
+- Do **not** attach a FlareSolverr/Byparr proxy or tag to these indexers in Prowlarr:
+  torrent-indexer talks to FlareSolverr or Byparr itself through `FLARESOLVERR_ADDRESS`, and
   an Indexer Proxy would solve every challenge twice.
 - When a site changes domain, update torrent-indexer (`INDEXER_<NAME>_URL`), not
   these files.

@@ -43,9 +43,16 @@ You can configure the server using the following environment variables:
 - `LOG_LEVEL`: (optional) The log level. Default: `1` (info). 
   - Possible values: `0` (debug), `1` (info), `2` (warn), `3` (error)
 - `LOG_FORMAT`: (optional) The log format. Can be "json" or default to console logger.
-- `FLARESOLVERR_ADDRESS`: (optional) The address of the FlareSolverr instance, including scheme and port, e.g. `http://192.168.6.10:8191`. If only a host/IP is provided, port `8191` and `http://` are assumed. Default: `N/A`
-- `FLARESOLVERR_TIMEOUT_SECONDS`: (optional) Timeout for flaresolverr requests. Default: `30`
-- `FLARESOLVERR_POOL_SIZE`: (optional) Number of FlareSolverr sessions in the pool. Default: `5`
+- `FLARESOLVERR_ADDRESS`: (optional) The address of a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) or [Byparr](https://github.com/ThePhaseless/Byparr) instance — both solve Cloudflare challenges and speak the same API, so either works — including scheme and port, e.g. `http://192.168.6.10:8191`. If only a host/IP is provided, port `8191` and `http://` are assumed. Default: `N/A`
+- `FLARESOLVERR_TIMEOUT_SECONDS`: (optional) Timeout for each challenge solve. Solves usually take 15–40s, so a shorter timeout throws finished work away. Default: `60`
+- `FLARESOLVERR_POOL_SIZE`: (optional) How many solves are sent at once (FlareSolverr sessions; Byparr has no sessions, so it only bounds the concurrent requests). Default: `5`
+
+  How the solver is used: a page goes to FlareSolverr/Byparr only when the plain
+  client gets a Cloudflare challenge. The `cf_clearance` cookie and user agent the
+  solve returns are then reused by the plain client for the next pages of the same
+  site (about 1s each instead of a 15–40s solve) until the site rejects them, and
+  only one solve per site runs at a time — a burst of pages costs a single solve
+  instead of flooding the solver.
 - `SPOOFED_USER_AGENT`: (optional) Overrides the browser User-Agent sent by the plain HTTP client. Default: a recent desktop Chrome UA
 - `REQUEST_TIMEOUT_MILLISECONDS`: (optional) Timeout for external scraping requests. Default: `5000`
 - `MEILISEARCH_ADDRESS`: (optional) The address of the MeiliSearch instance. Default: `N/A`
@@ -241,9 +248,9 @@ attributes — and Sonarr/Radarr custom formats live in
 [`integrations/`](integrations/), together with the full setup guide (URLs for every
 indexer, where to copy the files, which path to choose).
 
-Do not add a `flaresolverr` tag unless you intentionally configured a Prowlarr
-Indexer Proxy with the same tag; torrent-indexer uses `FLARESOLVERR_ADDRESS` in its
-own container environment.
+Do not add a FlareSolverr/Byparr proxy tag unless you intentionally configured a
+Prowlarr Indexer Proxy with the same tag; torrent-indexer talks to FlareSolverr or
+Byparr itself through `FLARESOLVERR_ADDRESS` in its own container environment.
 
 
 ## Mirrors

@@ -12,7 +12,7 @@ services:
     environment:
       - LOG_LEVEL=0 # 0=debug, 1=info, 2=warn, 3=error
       - REDIS_HOST=redis
-      - FLARESOLVERR_ADDRESS=http://flaresolverr:8191
+      - FLARESOLVERR_ADDRESS=http://flaresolverr:8191 # FlareSolverr or Byparr: same API
 
       ## Meilisearch configuration (optional)
       # - MEILISEARCH_ADDRESS=http://meilisearch:7700
