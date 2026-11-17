@@ -84,6 +84,11 @@ func (t *SearchIndexer) IndexTorrents(torrents []schema.IndexedTorrent) error {
 		schema.IndexedTorrent
 	}, 0, len(torrents))
 	for _, torrent := range torrents {
+		if torrent.InfoHash == "" {
+			// no document id yet (magnet resolved on demand): Meilisearch
+			// would reject the whole batch
+			continue
+		}
 		torrentWithKey := struct {
 			Hash string `json:"id"`
 			schema.IndexedTorrent

@@ -72,7 +72,7 @@ func FullfilMissingMetadata(i *Indexer, r *http.Request, torrents []schema.Index
 	}
 
 	return utils.ParallelFlatMap(torrents, func(it schema.IndexedTorrent) ([]schema.IndexedTorrent, error) {
-		if it.Size != "" && it.Title != "" && it.OriginalTitle != "" {
+		if it.MagnetLink == "" || (it.Size != "" && it.Title != "" && it.OriginalTitle != "") {
 			return []schema.IndexedTorrent{it}, nil
 		}
 

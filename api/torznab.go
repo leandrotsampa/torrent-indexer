@@ -427,10 +427,16 @@ func newTorznabItem(def torznabIndexer, it schema.IndexedTorrent) torznabItem {
 	for _, category := range categories {
 		attrs = append(attrs, newTorznabAttr("category", strconv.Itoa(category)))
 	}
+	if !it.PeersUnknown {
+		// not measured: leave them out, Sonarr/Radarr would read zero seeders
+		// and reject the release against the indexer's minimum
+		attrs = append(attrs,
+			newTorznabAttr("seeders", strconv.Itoa(it.SeedCount)),
+			newTorznabAttr("leechers", strconv.Itoa(it.LeechCount)),
+			newTorznabAttr("peers", strconv.Itoa(it.SeedCount+it.LeechCount)),
+		)
+	}
 	attrs = append(attrs,
-		newTorznabAttr("seeders", strconv.Itoa(it.SeedCount)),
-		newTorznabAttr("leechers", strconv.Itoa(it.LeechCount)),
-		newTorznabAttr("peers", strconv.Itoa(it.SeedCount+it.LeechCount)),
 		newTorznabAttr("size", strconv.FormatInt(size, 10)),
 		// Public trackers: nothing counts against a ratio.
 		newTorznabAttr("downloadvolumefactor", "1"),
@@ -465,15 +471,20 @@ func newTorznabItem(def torznabIndexer, it schema.IndexedTorrent) torznabItem {
 		attrs = append(attrs, newTorznabAttr("language", language))
 	}
 
+	// the magnet when known, else the endpoint that resolves it on demand
+	link := it.MagnetLink
+	if link == "" {
+		link = it.DownloadLink
+	}
 	guid := it.InfoHash
 	if guid == "" {
-		guid = it.MagnetLink
+		guid = link
 	}
 
 	item := torznabItem{
 		Title:       it.Title,
 		GUID:        guid,
-		Link:        it.MagnetLink,
+		Link:        link,
 		Comments:    it.Details,
 		Description: it.OriginalTitle,
 		Categories:  categories,
@@ -488,9 +499,9 @@ func newTorznabItem(def torznabIndexer, it schema.IndexedTorrent) torznabItem {
 	if !it.Date.IsZero() {
 		item.PubDate = it.Date.UTC().Format(torznabDateLayout)
 	}
-	if it.MagnetLink != "" {
+	if link != "" {
 		item.Enclosure = &torznabEnclosure{
-			URL:    it.MagnetLink,
+			URL:    link,
 			Length: size,
 			Type:   "application/x-bittorrent",
 		}
@@ -503,6 +514,12 @@ func newTorznabItem(def torznabIndexer, it schema.IndexedTorrent) torznabItem {
 const torznabDateLayout = "Mon, 02 Jan 2006 15:04:05 -0700"
 
 func torznabFeedLink(r *http.Request) string {
+	return requestBaseURL(r) + r.URL.Path
+}
+
+// requestBaseURL is this service's address as the client reached it (scheme
+// and host), for links the client has to follow back.
+func requestBaseURL(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
@@ -511,7 +528,7 @@ func torznabFeedLink(r *http.Request) string {
 		scheme = forwarded
 	}
 
-	return fmt.Sprintf("%s://%s%s", scheme, r.Host, r.URL.Path)
+	return fmt.Sprintf("%s://%s", scheme, r.Host)
 }
 
 // writeTorznabCaps advertises the search modes and categories of the indexer.

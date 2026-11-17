@@ -101,6 +101,7 @@ func main() {
 	indexerMux.HandleFunc("/indexers/starck-filmes", indexers.HandlerStarckFilmesIndexer)
 	indexerMux.HandleFunc("/indexers/torrent-dos-filmes", indexers.HandlerTorrentDosFilmesIndexer)
 	indexerMux.HandleFunc("/indexers/vaca_torrent", indexers.HandlerVacaTorrentIndexer)
+	indexerMux.HandleFunc(handler.VacaTorrentMagnetPath, indexers.HandlerVacaTorrentMagnet)
 	indexerMux.HandleFunc("/indexers/erai_raws", indexers.HandlerEraiRawsIndexer)
 	indexerMux.HandleFunc("/indexers/nyaa", indexers.HandlerNyaaIndexer)
 	indexerMux.HandleFunc("/indexers/darkmahou", indexers.HandlerDarkmahouIndexer)

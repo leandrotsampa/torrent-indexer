@@ -44,10 +44,16 @@ search:
       selector: $.count
 
   fields:
-    _id:
-      selector: info_hash
-    download:
+    # The magnet when known; otherwise the torrent-indexer link that resolves
+    # it when the release is grabbed (it answers with a redirect to the magnet).
+    _magnet:
       selector: magnet_link
+      optional: true
+    _download:
+      selector: download_link
+      optional: true
+    download:
+      text: "{{ if .Result._magnet }}{{ .Result._magnet }}{{ else }}{{ .Result._download }}{{ end }}"
     title:
       selector: title
       filters:
@@ -59,14 +65,27 @@ search:
       selector: details
     infohash:
       selector: info_hash
+      optional: true
     date:
       selector: date
     size:
       selector: size
-    seeders:
+      optional: true
+    # Not measured until the magnet is known: left empty (so the release is
+    # not rejected for "0 seeders") instead of reported as zero.
+    _peers_unknown:
+      selector: peers_unknown
+      optional: true
+    _seeders:
       selector: seed_count
-    leechers:
+    _leechers:
       selector: leech_count
+    seeders:
+      text: "{{ if .Result._peers_unknown }}{{ else }}{{ .Result._seeders }}{{ end }}"
+      optional: true
+    leechers:
+      text: "{{ if .Result._peers_unknown }}{{ else }}{{ .Result._leechers }}{{ end }}"
+      optional: true
     imdbid:
       selector: imdb
       optional: true

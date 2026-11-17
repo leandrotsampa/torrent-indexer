@@ -137,6 +137,17 @@ Brazilian sites name things:
   an Indexer Proxy would solve every challenge twice.
 - When a site changes domain, update torrent-indexer (`INDEXER_<NAME>_URL`), not
   these files.
+- `vaca_torrent` hides every download behind a resolver link (a few requests
+  behind a Cloudflare challenge), and a search can list hundreds of them. The
+  search lists each download from what the site shows next to it (episode,
+  audio, quality, size, subtitles) and the magnet is resolved only when the
+  release is grabbed: the download link points to torrent-indexer
+  (`/indexers/vaca_torrent/magnet?link=...`), which answers with a redirect to
+  the magnet. So Prowlarr (and Sonarr/Radarr, when they use the Torznab feed
+  directly) must reach torrent-indexer at the address they search it with. The
+  first grab takes about 15s (one FlareSolverr/Byparr solve), the next ones about
+  2s; seeders show up once a release has been grabbed, and stay empty (not zero)
+  before that.
 - `erai_raws` needs an Erai-raws account token (`ERAI_RAWS_AUTH_TOKEN` or
   `INDEXER_ERAI_RAWS_RSS_URL`); without it every search fails with an
   authentication error.

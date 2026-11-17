@@ -51,18 +51,22 @@ func (i *Indexer) HandlerVacaTorrentIndexer(w http.ResponseWriter, r *http.Reque
 		page = "1"
 	}
 
+	// Prowlarr turns S02/S02E01 into "temporada 2", which the site's search
+	// does not understand: search the title, keep only that season
+	siteQuery, season := splitVacaQuery(q)
+
 	var (
 		links     []string
 		targetURL string
 		err       error
 	)
-	if q == "" {
+	if siteQuery == "" {
 		targetURL = buildVacaTorrentURL(metadata, page)
 		logging.InfoWithRequest(r).Str("target_url", targetURL).Msg("Processing indexer request")
 		links, err = getVacaTorrentListingLinks(ctx, i, targetURL)
 	} else {
 		var form url.Values
-		targetURL, form, err = buildVacaTorrentSearchRequest(metadata, q, page)
+		targetURL, form, err = buildVacaTorrentSearchRequest(metadata, siteQuery, page)
 		if err == nil {
 			logging.InfoWithRequest(r).Str("target_url", targetURL).Str("query", q).Msg("Processing indexer request")
 			links, err = getVacaTorrentSearchLinks(ctx, i, targetURL, form, page, metadata.URL)
@@ -79,13 +83,14 @@ func (i *Indexer) HandlerVacaTorrentIndexer(w http.ResponseWriter, r *http.Reque
 	}
 
 	referer := metadata.URL
-	if q == "" {
+	if siteQuery == "" {
 		referer = targetURL
 	}
+	scope := vacaScope{season: season, baseURL: requestBaseURL(r), allSeasons: siteQuery != ""}
 
 	// extract each torrent link
 	indexedTorrents := utils.ParallelFlatMap(links, func(link string) ([]schema.IndexedTorrent, error) {
-		return getTorrentsVacaTorrent(ctx, i, link, referer)
+		return getTorrentsVacaTorrent(ctx, i, link, referer, scope)
 	})
 
 	// Apply post-processors
@@ -264,6 +269,9 @@ func cleanVacaMagnetTrackers(magnetLink string) string {
 
 var commentRegex = regexp.MustCompile(`<!--(.*?)-->`)
 
+// vacaTitleYearRE reads the year of a post title: "A Odisseia (2026)".
+var vacaTitleYearRE = regexp.MustCompile(`\((\d{4})\)`)
+
 var (
 	// the resolver lived on systemtech.space and moved to the site's own host
 	// (vaqueirofilmes.com/enc/go.php) in 2026-11, so the host is not pinned
@@ -274,28 +282,71 @@ var (
 	vacaSystemTechRelayURL = "https://systemtech.space/enc/relay.php"
 )
 
-func getVacaTorrentLinkedMagnets(ctx context.Context, i *Indexer, doc *goquery.Document, referer string) []string {
-	var linkPages []string
+// vacaScope is what a search asks of each post.
+type vacaScope struct {
+	season  int    // only this season's pages (0: all)
+	baseURL string // this service, as the client reached it
+	// allSeasons opens every season of a show (a search); the listing of
+	// recent posts keeps to the season each post links, the one just updated
+	allSeasons bool
+}
+
+// getVacaTorrentLinks collects the releases a post links to: the magnets
+// published as is (legacy posts) and the download buttons of its movie-links
+// and season pages, which are listed without resolving them.
+func getVacaTorrentLinks(ctx context.Context, i *Indexer, doc *goquery.Document, postURL string, scope vacaScope) ([]string, []vacaDownload) {
 	var magnetLinks []string
+	var linkPages, seasonLists []string
 
 	doc.Find(".streaming-container a[href], .mf-top-wrap a[href]").Each(func(_ int, s *goquery.Selection) {
 		href, exists := s.Attr("href")
 		if !exists || href == "" {
 			return
 		}
-		if strings.HasPrefix(href, "magnet:") {
+		switch {
+		case strings.HasPrefix(href, "magnet:"):
 			magnetLinks = append(magnetLinks, href)
-			return
-		}
-		if strings.Contains(href, "/movie-links/") ||
-			strings.Contains(href, "/season/") ||
-			strings.Contains(href, "/season-internal/") {
+		case strings.Contains(href, "/season-internal/"):
+			if scope.allSeasons {
+				seasonLists = append(seasonLists, href)
+			}
+		case strings.Contains(href, "/movie-links/") || strings.Contains(href, "/season/"):
 			linkPages = append(linkPages, href)
 		}
 	})
 
-	for _, linkPage := range utils.StableUniq(linkPages) {
-		linkedDoc, err := getDocument(ctx, i, linkPage, referer)
+	// season-internal lists every season of the show; the post itself only
+	// links the latest one
+	for _, listURL := range utils.StableUniq(seasonLists) {
+		listDoc, err := getDocument(ctx, i, listURL, postURL)
+		if err != nil {
+			logging.Warn().Err(err).Str("url", listURL).Msg("Failed to fetch VacaTorrent season list")
+			continue
+		}
+		listDoc.Find(`a[href*="/season/"]`).Each(func(_ int, s *goquery.Selection) {
+			if href, _ := s.Attr("href"); href != "" {
+				linkPages = append(linkPages, resolveVacaHref(href, listURL))
+			}
+		})
+	}
+
+	var downloads []vacaDownload
+	seenPages := map[string]bool{}
+	for _, linkPage := range linkPages {
+		// the same season is linked as /pt/tv/... and /tv/...
+		key := strings.TrimPrefix(strings.TrimSuffix(linkPage, "/"), "/pt")
+		if parsed, err := url.Parse(linkPage); err == nil {
+			key = strings.TrimPrefix(strings.TrimSuffix(parsed.Path, "/"), "/pt")
+		}
+		if seenPages[key] {
+			continue
+		}
+		seenPages[key] = true
+		if scope.season > 0 && strings.Contains(linkPage, "/season/") && vacaSeasonOf(linkPage) != scope.season {
+			continue
+		}
+
+		linkedDoc, err := getDocument(ctx, i, linkPage, postURL)
 		if err != nil {
 			logging.Warn().Err(err).Str("url", linkPage).Msg("Failed to fetch VacaTorrent linked download page")
 			continue
@@ -305,14 +356,35 @@ func getVacaTorrentLinkedMagnets(ctx context.Context, i *Indexer, doc *goquery.D
 			magnetLinks = append(magnetLinks, magnetLink)
 		})
 		magnetLinks = append(magnetLinks, getVacaDataLinkMagnets(linkedDoc)...)
-		magnetLinks = append(magnetLinks, getVacaSystemTechDocMagnets(ctx, i, linkedDoc, linkPage)...)
+		downloads = append(downloads, parseVacaDownloads(linkedDoc, linkPage)...)
 	}
 
 	// legacy posts (root-level slugs, still returned by the search) carry the
-	// SystemTech links directly in the post page
-	magnetLinks = append(magnetLinks, getVacaSystemTechDocMagnets(ctx, i, doc, referer)...)
+	// resolver links directly in the post page
+	downloads = append(downloads, parseVacaDownloads(doc, postURL)...)
+	if scope.season > 0 {
+		kept := downloads[:0]
+		for _, d := range downloads {
+			if d.season == 0 || d.season == scope.season {
+				kept = append(kept, d)
+			}
+		}
+		downloads = kept
+	}
 
-	return utils.StableUniq(magnetLinks)
+	return utils.StableUniq(magnetLinks), uniqVacaDownloads(downloads)
+}
+
+func uniqVacaDownloads(downloads []vacaDownload) []vacaDownload {
+	seen := map[string]bool{}
+	kept := downloads[:0]
+	for _, d := range downloads {
+		if !seen[d.link] {
+			seen[d.link] = true
+			kept = append(kept, d)
+		}
+	}
+	return kept
 }
 
 // isVacaResolverLink reports whether link is an enc/go.php resolver link.
@@ -344,25 +416,12 @@ func findVacaResolverHrefs(doc *goquery.Document, pageURL string) []string {
 	return utils.StableUniq(hrefs)
 }
 
-func getVacaSystemTechDocMagnets(ctx context.Context, i *Indexer, doc *goquery.Document, pageURL string) []string {
-	var magnetLinks []string
-	for _, href := range findVacaResolverHrefs(doc, pageURL) {
-		resolvedMagnets, err := getVacaSystemTechMagnets(ctx, i, href, pageURL)
-		if err != nil {
-			logging.Warn().Err(err).Str("href", href).Msg("Failed to resolve VacaTorrent SystemTech link")
-			continue
-		}
-		magnetLinks = append(magnetLinks, resolvedMagnets...)
-	}
-	return magnetLinks
-}
-
 func getVacaSystemTechMagnets(ctx context.Context, i *Indexer, link, referer string) ([]string, error) {
 	if !isVacaResolverLink(link) {
 		return nil, fmt.Errorf("unsupported VacaTorrent resolver link: %s", link)
 	}
 
-	cacheKey := fmt.Sprintf("vaca_torrent:systemtech:%s", link)
+	cacheKey := vacaResolverCacheKey(link)
 	cached, err := i.redis.Get(ctx, cacheKey)
 	if err == nil {
 		return splitCachedVacaMagnets(cached), nil
@@ -391,11 +450,17 @@ func getVacaSystemTechMagnets(ctx context.Context, i *Indexer, link, referer str
 			return nil, "", fmt.Errorf("%w (flaresolverr fallback: %v)", err, ferr)
 		}
 		defer doc.Close()
-		body, ferr = io.ReadAll(doc)
+		solvedBody, ferr := io.ReadAll(doc)
 		if ferr != nil {
 			return nil, "", ferr
 		}
-		return body, targetURL, nil
+		// the solve left a clearance: fetch again with the plain client, so the
+		// session the next steps rely on lives in this client's cookie jar and
+		// not in the solver's browser
+		if body, finalURL, err := fetchVacaResolverURL(ctx, client, targetURL, ref, prepare); err == nil {
+			return body, finalURL, nil
+		}
+		return solvedBody, targetURL, nil
 	}
 
 	body, finalURL, err := fetch(link, referer)
@@ -441,6 +506,11 @@ func getVacaSystemTechMagnets(ctx context.Context, i *Indexer, link, referer str
 	}
 
 	return resolveVacaSecondStage(ctx, i, fetch, cacheKey, secondStageURL, finalURL)
+}
+
+// vacaResolverCacheKey is where the magnets behind a resolver link are kept.
+func vacaResolverCacheKey(link string) string {
+	return "vaca_torrent:systemtech:" + link
 }
 
 type vacaResolverFetch func(targetURL, referer string) ([]byte, string, error)
@@ -635,7 +705,7 @@ func cacheVacaMagnets(ctx context.Context, i *Indexer, cacheKey string, magnetLi
 	}
 }
 
-func getTorrentsVacaTorrent(ctx context.Context, i *Indexer, link, referer string) ([]schema.IndexedTorrent, error) {
+func getTorrentsVacaTorrent(ctx context.Context, i *Indexer, link, referer string, scope vacaScope) ([]schema.IndexedTorrent, error) {
 	var indexedTorrents []schema.IndexedTorrent
 	doc, err := getDocument(ctx, i, link, referer)
 	if err != nil {
@@ -647,7 +717,12 @@ func getTorrentsVacaTorrent(ctx context.Context, i *Indexer, link, referer strin
 	if title == "" {
 		title = strings.TrimSpace(doc.Find("h1").First().Text())
 	}
-	// Remove release date from title if present
+	// Remove release date from title if present, keeping its year: "A
+	// Odisseia (2026)"
+	titleYear := ""
+	if m := vacaTitleYearRE.FindStringSubmatch(title); m != nil {
+		titleYear = m[1]
+	}
 	title = strings.TrimSpace(strings.Split(title, "(")[0])
 
 	// Extract metadata from the list items
@@ -704,6 +779,10 @@ func getTorrentsVacaTorrent(ctx context.Context, i *Indexer, link, referer strin
 		size = append(size, findSizesFromText(html)...)
 	})
 
+	if year == "" {
+		year = titleYear
+	}
+
 	if date.Year() == 0 {
 		yearInt, _ := strconv.Atoi(year)
 		date = time.Date(yearInt, date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
@@ -740,7 +819,8 @@ func getTorrentsVacaTorrent(ctx context.Context, i *Indexer, link, referer strin
 		}
 	})
 
-	magnetLinks = append(magnetLinks, getVacaTorrentLinkedMagnets(ctx, i, doc, link)...)
+	linkedMagnets, downloads := getVacaTorrentLinks(ctx, i, doc, link, scope)
+	magnetLinks = append(magnetLinks, linkedMagnets...)
 	for idx, magnetLink := range magnetLinks {
 		magnetLinks[idx] = cleanVacaMagnetTrackers(magnetLink)
 	}
@@ -806,6 +886,11 @@ func getTorrentsVacaTorrent(ctx context.Context, i *Indexer, link, referer strin
 			indexedTorrents = append(indexedTorrents, it)
 		}
 	}
+
+	post := vacaPost{link: link, title: title, year: year, imdb: imdbLink, audio: audio, date: date, baseURL: scope.baseURL}
+	indexedTorrents = append(indexedTorrents, utils.ParallelFlatMap(downloads, func(d vacaDownload) ([]schema.IndexedTorrent, error) {
+		return []schema.IndexedTorrent{vacaDownloadTorrent(ctx, i, post, d)}, nil
+	})...)
 
 	return indexedTorrents, nil
 }
