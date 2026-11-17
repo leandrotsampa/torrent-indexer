@@ -278,3 +278,45 @@ func TestApplyClearanceOnForeignRequests(t *testing.T) {
 		t.Errorf("foreign request with the clearance: status %d, want 200", resp.StatusCode)
 	}
 }
+
+func TestGetDocumentDoesNotSolveServerErrors(t *testing.T) {
+	var hits int32
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(site.Close)
+
+	var solves int32
+	r := newTestRequester(t, newFakeByparr(t, "127.0.0.1", &solves).URL)
+
+	_, err := r.GetDocument(t.Context(), site.URL+"/index.php?busca=ranma+(2024)")
+	if err == nil || !strings.Contains(err.Error(), "HTTP 500") {
+		t.Fatalf("GetDocument() error = %v, want the site's HTTP 500", err)
+	}
+	if solves != 0 {
+		t.Errorf("solves = %d, want 0: a plain 5xx is not a Cloudflare block", solves)
+	}
+	// still retried with the plain client, as 5xx can be transient
+	if want := int32(maxPlainRetries + 1); hits != want {
+		t.Errorf("plain attempts = %d, want %d", hits, want)
+	}
+}
+
+func TestGetDocumentSolvesChallengedServerErrors(t *testing.T) {
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, "<html><head><title>Just a moment...</title></head></html>")
+	}))
+	t.Cleanup(site.Close)
+
+	var solves int32
+	r := newTestRequester(t, newFakeByparr(t, "127.0.0.1", &solves).URL)
+
+	if got := readDocument(t, r, site.URL+"/page"); !strings.Contains(got, "solved") {
+		t.Fatalf("page = %q, want the solver's page", got)
+	}
+	if solves != 1 {
+		t.Errorf("solves = %d, want 1", solves)
+	}
+}

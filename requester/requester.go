@@ -159,6 +159,12 @@ func (i *Requster) GetDocument(ctx context.Context, url string, referer ...strin
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 	bodyByte = buf.Bytes()
+	// A 5xx without challenge markers is the site's own server failing (the
+	// redestorrents search answers 500 to some queries): the solver cannot fix
+	// it and would only hold the request until its own timeout.
+	if resp != nil && resp.StatusCode >= http.StatusInternalServerError && !hasChallange(bodyByte) && !isCloudflareChallenge(resp) {
+		return nil, fmt.Errorf("site answered HTTP %d for url %s", resp.StatusCode, url)
+	}
 	// also fall back on a still-blocked answer (e.g. a 403 without challenge markers)
 	if hasChallange(bodyByte) || (resp != nil && isRetryableStatus(resp.StatusCode)) {
 		// try request with flare solverr
@@ -267,8 +273,9 @@ func (i *Requster) ExpireDocument(ctx context.Context, url string) error {
 
 // hasChallange checks if the body contains a challange by regex matching
 // isRetryableStatus reports whether status is a transient block/failure worth
-// retrying (or handing to FlareSolverr): 403, 429 and 5xx. Other 4xx (e.g. a
-// legit 404) are final.
+// retrying: 403, 429 and 5xx. Other 4xx (e.g. a legit 404) are final. After the
+// retries, 403/429 go to FlareSolverr, but a 5xx only when it carries a
+// Cloudflare challenge.
 func isRetryableStatus(status int) bool {
 	return status == http.StatusForbidden || status == http.StatusTooManyRequests || status >= 500
 }
